@@ -1,0 +1,8 @@
+# the versions electrocheck-engine runs with in production
+fastapi==0.141.1
+uvicorn==0.52.4
+httpx==0.28.1
+google-genai==2.23.0
+python-dotenv==1.2.3
+# the time zone database (Windows has none of its own)
+tzdata>=2024.1

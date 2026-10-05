@@ -1,0 +1,536 @@
+"""electrocheck-engine: decides whether a factual claim made on French television is true, and on which sources.
+
+POST /check takes one claim that was already extracted from the transcript and proven to be the speaker's own words, and
+returns the verdict, its explanation, the sources it rests on and the flags the verdict was judged by. GET / is a page to try it.
+
+One check is 1 to 3 Gemini calls with Google Search, plus one Linkup web search when a Linkup key is set:
+  linkup_first  a small model writes a Linkup query; Linkup's pages (primary sources first) are given to Gemini, which cites
+                them by number. No usable source: once more, thinking harder.
+  google_first  Gemini with Google Search alone. No usable link: Linkup's pages and Gemini again with its first answer, then
+                once more thinking harder.
+A source is usable when it is a page, not a site's homepage. Still none: the verdict comes back with no source.
+
+The model proposes, the code decides: a verdict whose own flags say the words are not the speaker's own assertion, that the
+claim does not say exactly what they said, that it judged a sense the speaker did not mean, or that it rests on anything but
+independent facts becomes "insuffisant". Not finding is not refuting: a negative verdict needs a source that says so
+directly or by inference, and an inferred "faux" is lowered to "plutot_faux".
+"""
+from __future__ import annotations
+
+import json
+import logging
+import os
+import re
+import time
+from datetime import date, datetime, timedelta, timezone
+from pathlib import Path
+from urllib.parse import unquote, urlparse
+from zoneinfo import ZoneInfo
+
+import httpx
+from dotenv import load_dotenv
+from fastapi import FastAPI, Request
+from fastapi.responses import FileResponse, JSONResponse
+from google import genai
+from google.genai import types
+
+import prompts
+
+HERE = Path(__file__).resolve().parent
+load_dotenv(HERE / ".env", override=False)
+logging.basicConfig(level=logging.WARNING, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+log = logging.getLogger("electrocheck")
+log.setLevel(logging.INFO)                                          # the engine's own steps; the libraries' warnings only
+
+# ---------------------------------------------------------------- settings (.env or environment)
+
+GEMINI_KEY = os.environ.get("API_GEMINI", "")
+LINKUP_KEY = os.environ.get("API_LINKUP", "")                       # optional: without it, Gemini's own search only
+MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.8-flash")           # the check
+QUERY_MODEL = os.environ.get("GEMINI_PREFLIGHT_MODEL", "gemini-3.5-flash-lite")   # the Linkup query
+API_VERSION = os.environ.get("GEMINI_API_VERSION", "v1")
+CHECK_ORDER = os.environ.get("CHECK_ORDER", "google_first")         # google_first | linkup_first
+CONFIDENCE_THRESHOLD = float(os.environ.get("CONFIDENCE_THRESHOLD", "0.7"))     # under it, the verdict is to be reviewed
+HOST = os.environ.get("HOST", "127.0.0.1")
+PORT = int(os.environ.get("PORT", "8050"))
+
+client = genai.Client(api_key=GEMINI_KEY, http_options={"api_version": API_VERSION}) if GEMINI_KEY else None
+
+# ---------------------------------------------------------------- sources
+
+# Searched first; also listed in the check prompt.
+CATALOG = (
+    ("INSEE", "https://www.insee.fr"),
+    ("OCDE", "https://www.oecd.org"),
+    ("Eurostat", "https://ec.europa.eu/eurostat"),
+    ("data.gouv.fr", "https://www.data.gouv.fr"),
+    ("Assemblée nationale", "https://www.assemblee-nationale.fr"),
+    ("Sénat", "https://www.senat.fr"),
+    ("Cour des comptes", "https://www.ccomptes.fr"),
+    ("Vie publique", "https://www.vie-publique.fr"),
+    ("Légifrance", "https://www.legifrance.gouv.fr"),
+    ("Gouvernement", "https://www.gouvernement.fr"),
+    ("Ministère de l'Économie", "https://www.economie.gouv.fr"),
+    ("Ministère du Travail", "https://travail-emploi.gouv.fr"),
+    ("Ministère de l'Intérieur", "https://www.interieur.gouv.fr"),
+    ("Ministère de l'Éducation", "https://www.education.gouv.fr"),
+    ("Ministère de la Santé", "https://sante.gouv.fr"),
+    ("Ministère de la Transition écologique", "https://www.ecologie.gouv.fr"),
+    ("Banque de France", "https://www.banque-france.fr"),
+    ("OFCE", "https://www.ofce.sciences-po.fr"),
+    ("Our World in Data", "https://ourworldindata.org"),
+    ("FMI", "https://www.imf.org"),
+    ("Banque mondiale", "https://www.worldbank.org"),
+)
+CATALOG_DOMAINS = tuple((urlparse(url).hostname or "").removeprefix("www.") for _, url in CATALOG)
+SOURCE_LIST = "\n".join(f"- {name} ({domain}) — {url}" for (name, url), domain in zip(CATALOG, CATALOG_DOMAINS))
+
+# Source tiers: 1 primary (official statistics, institutions, parliaments, international bodies, public research, Our World in
+# Data), 2 big newspapers and well-known media, 3 the rest. A domain matches itself and its subdomains.
+FIRST_PARTY = tuple(url.split("//", 1)[1].split("/", 1)[0].removeprefix("www.") for _, url in CATALOG) + (
+    "ec.europa.eu", "europa.eu", "dares.travail-emploi.gouv.fr", "drees.solidarites-sante.gouv.fr", "ined.fr", "inrae.fr",
+    "cnrs.fr", "cepii.fr", "strategie.gouv.fr", "cae-eco.fr", "cor-retraites.fr", "ademe.fr", "insee.fr", "conseil-constitutionnel.fr",
+    "conseil-etat.fr", "elysee.fr", "info.gouv.fr", "service-public.fr", "fondsdereserve.fr", "securite-sociale.fr", "urssaf.fr",
+    "francetravail.fr", "ifop.com", "elabe.fr", "ipsos.com", "un.org", "who.int", "ilo.org", "imf.org", "wto.org", "ecb.europa.eu",
+    "kielinstitut.de", "ifw-kiel.de", "sipri.org", "iea.org", "europarl.europa.eu", "consilium.europa.eu",
+)
+FIRST_PARTY_SUFFIXES = (".gouv.fr", ".europa.eu", ".int", ".un.org", ".gov", ".gov.uk", ".admin.ch")
+SECOND_PARTY = (
+    "lemonde.fr", "lefigaro.fr", "liberation.fr", "lesechos.fr", "latribune.fr", "leparisien.fr", "ouest-france.fr", "la-croix.com",
+    "humanite.fr", "lopinion.fr", "francetvinfo.fr", "franceinfo.fr", "radiofrance.fr", "franceinter.fr", "francebleu.fr",
+    "france24.com", "rfi.fr", "tv5monde.com", "bfmtv.com", "tf1info.fr", "lci.fr", "francetelevisions.fr", "publicsenat.fr", "lcp.fr",
+    "20minutes.fr", "lexpress.fr", "lepoint.fr", "nouvelobs.com", "marianne.net", "challenges.fr", "capital.fr", "mediapart.fr",
+    "huffingtonpost.fr", "lejdd.fr", "europe1.fr", "rtl.fr", "sudouest.fr", "ladepeche.fr", "letelegramme.fr", "lavoixdunord.fr",
+    "leprogres.fr", "ledauphine.com", "lindependant.fr", "midilibre.fr", "dna.fr", "estrepublicain.fr", "alternatives-economiques.fr",
+    "usinenouvelle.com", "lemoniteur.fr", "contexte.com", "politico.eu", "euronews.com", "euractiv.fr", "euractiv.com", "afp.com",
+    "reuters.com", "apnews.com", "bloomberg.com", "bbc.com", "bbc.co.uk", "theguardian.com", "nytimes.com", "washingtonpost.com",
+    "ft.com", "economist.com", "wsj.com", "spiegel.de", "lesoir.be", "rtbf.be", "letemps.ch", "courrierinternational.com",
+    "slate.fr", "next.ink", "numerama.com", "lemondeinformatique.fr", "pv-magazine.fr", "connaissancedesenergies.org",
+)
+TIER_LABELS = {1: "source primaire", 2: "grand média", 3: "autre source"}
+
+# Linkup (api.linkup.so), used as its best practices say: depth "standard" (one agentic pass, 1-3 s), raw search results for
+# an LLM to read, the query an instruction rather than the claim pasted, dates in fromDate, many results and the best kept.
+LINKUP_URL = "https://api.linkup.so/v1/search"
+LINKUP_RESULTS = 15           # asked of Linkup
+LINKUP_PAGES = 12             # given to Gemini, best tier first
+SNIPPET_CHARS = 600           # of each page's text
+QUERY_CHARS = 700
+# nobody can cite these as a source (a video of the speaker saying the same thing is no evidence)
+LINKUP_EXCLUDE = ["facebook.com", "x.com", "twitter.com", "instagram.com", "tiktok.com", "youtube.com", "dailymotion.com",
+                  "linkedin.com", "video.lefigaro.fr"]
+
+# ---------------------------------------------------------------- verdicts and text limits
+
+ORDERS = ("google_first", "linkup_first")
+VERDICTS = ("vrai", "plutot_vrai", "mixte", "plutot_faux", "faux", "insuffisant")
+VERDICT_ALIASES = {"true": "vrai", "false": "faux", "mostly true": "plutot_vrai", "mostly false": "plutot_faux",
+                   "plutôt vrai": "plutot_vrai", "plutot vrai": "plutot_vrai", "plutôt faux": "plutot_faux",
+                   "plutot faux": "plutot_faux", "à relire": "insuffisant", "indetermine": "insuffisant", "indéterminé": "insuffisant"}
+NEGATIVE = ("faux", "plutot_faux", "mixte")
+CAPTION_CHARS = 800           # the captions given to the check
+CONTEXT_CHARS = 520           # the raw transcript around the claim
+AFTER_CHARS = 800             # what was said right after the claim
+SAYS_CHARS = 400              # what a source says, in the answer
+JSON_ATTEMPTS = 2             # a JSON-only answer with a stray character is asked again: the same prompt almost always comes back clean
+PARIS = ZoneInfo("Europe/Paris")
+
+
+# ---------------------------------------------------------------- the few things done more than once
+
+def compact(text: str, limit: int) -> str:
+    """One line of at most `limit` characters, cut at a word, "…" when cut."""
+    cleaned = re.sub(r"\s+", " ", text).strip()
+    return cleaned if len(cleaned) <= limit else cleaned[: limit - 1].rsplit(" ", 1)[0] + "…"
+
+
+def parse_json(text: str):
+    """The JSON object (or array) of a model's answer, even inside a ```json fence or some prose."""
+    cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", text.strip(), flags=re.IGNORECASE).strip()
+    try:
+        return json.loads(cleaned)
+    except json.JSONDecodeError:
+        pass
+    for opener, closer in (("{", "}"), ("[", "]")):
+        start, end = cleaned.find(opener), cleaned.rfind(closer)
+        if start != -1 and end > start:
+            try:
+                return json.loads(cleaned[start : end + 1])
+            except json.JSONDecodeError:
+                continue
+    raise ValueError("Réponse LLM sans JSON exploitable")
+
+
+def tokens(response) -> tuple[int, int]:
+    """(input, output) tokens of a Gemini response: the prompt and the tool results in, the answer and the thinking out."""
+    meta = getattr(response, "usage_metadata", None)
+    if not meta:
+        return 0, 0
+    return (int(getattr(meta, "prompt_token_count", 0) or 0) + int(getattr(meta, "tool_use_prompt_token_count", 0) or 0),
+            int(getattr(meta, "candidates_token_count", 0) or 0) + int(getattr(meta, "thoughts_token_count", 0) or 0))
+
+
+async def gemini(prompt: str, model: str, *, search: bool = False, url_context: bool = False, thinking: str | None = None) -> dict:
+    """One Gemini answer: {"payload", "grounding" (the links of its Google searches), "input_tokens", "output_tokens",
+    "searches" (distinct Google queries, the billed unit)}. With search the answer is free text that must hold JSON; without,
+    JSON is enforced and asked again once when it comes back empty or broken."""
+    config = {"temperature": 0.1}
+    if thinking:
+        config["thinking_config"] = types.ThinkingConfig(thinking_level=thinking.upper())
+    if search:
+        config["tools"] = [types.Tool(google_search=types.GoogleSearch())] + (
+            [types.Tool(url_context=types.UrlContext())] if url_context else [])
+    else:
+        config["response_mime_type"] = "application/json"
+    config = types.GenerateContentConfig(**config)
+    if not search:
+        spent_in = spent_out = 0                     # a failed attempt costs tokens too
+        for attempt in range(1, JSON_ATTEMPTS + 1):
+            response = await client.aio.models.generate_content(model=model, contents=prompt, config=config)
+            used_in, used_out = tokens(response)
+            spent_in, spent_out = spent_in + used_in, spent_out + used_out
+            text = (response.text or "").strip()
+            last = attempt == JSON_ATTEMPTS
+            if not text:
+                if last:
+                    raise RuntimeError("Réponse Gemini vide")
+                log.warning("Réponse Gemini vide, nouvel essai")
+                continue
+            try:
+                return {"payload": parse_json(text), "grounding": [], "input_tokens": spent_in, "output_tokens": spent_out,
+                        "searches": 0}
+            except ValueError:
+                if last:
+                    raise
+                log.warning("JSON invalide dans la réponse Gemini, nouvel essai (fin de réponse : %r)", text[-60:])
+
+    response = await client.aio.models.generate_content(model=model, contents=prompt, config=config)
+    text = (response.text or "").strip()
+    if not text:
+        raise RuntimeError("Réponse Gemini vide")
+    spent_in, spent_out = tokens(response)
+    grounding, queries, chunks = [], set(), 0
+    for candidate in getattr(response, "candidates", None) or []:
+        meta = getattr(candidate, "grounding_metadata", None)
+        if not meta:
+            continue
+        queries |= {str(q or "").strip() for q in getattr(meta, "web_search_queries", None) or []} - {""}
+        chunks += len(getattr(meta, "grounding_chunks", None) or [])
+        for chunk in getattr(meta, "grounding_chunks", None) or []:
+            web = getattr(chunk, "web", None)
+            url = str(getattr(web, "uri", "") or "") if web else ""
+            if url and url not in {g["url"] for g in grounding}:
+                grounding.append({"title": str(getattr(web, "title", "") or url), "url": url})
+    searches = len(queries) or (1 if chunks else 0)
+    try:
+        payload = parse_json(text)
+    except ValueError:
+        repaired = await client.aio.models.generate_content(
+            model=model, contents=prompts.JSON_REPAIR + text,
+            config=types.GenerateContentConfig(temperature=0, response_mime_type="application/json"))
+        extra_in, extra_out = tokens(repaired)
+        payload, spent_in, spent_out = parse_json((repaired.text or "").strip()), spent_in + extra_in, spent_out + extra_out
+    return {"payload": payload, "grounding": grounding, "input_tokens": spent_in, "output_tokens": spent_out, "searches": searches}
+
+
+def domain(url: str) -> str:
+    return (urlparse(url).hostname or "").removeprefix("www.")
+
+
+def tier(url: str, title: str = "") -> int:
+    """1, 2 or 3 (see the tiers above). A Google grounding link (a vertexaisearch redirect) carries its site in the title."""
+    host = domain(url)
+    if host == "vertexaisearch.cloud.google.com":
+        host = (title or "").strip().lower().removeprefix("www.")
+    if any(host == d or host.endswith("." + d) for d in FIRST_PARTY) or host.endswith(FIRST_PARTY_SUFFIXES):
+        return 1
+    if any(host == d or host.endswith("." + d) for d in SECOND_PARTY):
+        return 2
+    return 3
+
+
+def same_page(url: str) -> tuple[str, str, str]:
+    """A page however the model spells its URL: host without www, decoded path without a trailing slash, query."""
+    p = urlparse(url.strip())
+    return (p.hostname or "").removeprefix("www."), unquote(p.path).rstrip("/"), unquote(p.query)
+
+
+def usable(url: str) -> bool:
+    """A page, not a site's homepage."""
+    return bool(urlparse(url).path.strip("/"))
+
+
+def merge_sources(written: list, grounding: list[dict]) -> list[dict]:
+    """The sources of an answer, once each: the catalogue's first, then the others, then sorted by tier."""
+    merged, seen = [], set()
+    for raw in list(written or []) + grounding:
+        if not isinstance(raw, dict):
+            continue
+        url = str(raw.get("url") or raw.get("uri") or "").strip()
+        title = str(raw.get("title") or url).strip()
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        merged.append({"title": title or url, "url": url, "domain": domain(url), "tier": tier(url, title),
+                       "says": " ".join(str(raw.get("says") or "").split())[:SAYS_CHARS]})
+    preferred = [s for s in merged if any(s["domain"] and s["domain"].endswith(d) for d in CATALOG_DOMAINS)]
+    return sorted(preferred + [s for s in merged if s not in preferred], key=lambda s: s["tier"] or 3)
+
+
+def flag(value) -> bool | None:
+    """A true/false flag as the model writes it; None when absent or unreadable, which is never a yes."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str) and value.strip().lower() in ("true", "vrai", "oui", "yes"):
+        return True
+    if isinstance(value, str) and value.strip().lower() in ("false", "faux", "non", "no"):
+        return False
+    return None
+
+
+# ---------------------------------------------------------------- the service
+
+app = FastAPI(title="electrocheck-engine", docs_url=None, redoc_url=None, openapi_url=None)
+
+
+@app.exception_handler(Exception)
+async def failed(_request: Request, exc: Exception) -> JSONResponse:
+    return JSONResponse({"error": str(exc)}, status_code=500)
+
+
+@app.get("/")
+async def page() -> FileResponse:
+    return FileResponse(HERE / "index.html")
+
+
+@app.post("/check")
+async def check(claim: dict) -> dict:
+    """One claim -> its verdict. Fields (only "claim" is required):
+    id, claim (the sentence to check), speaker, quote (their exact words), sentence (the whole sentence around them),
+    meant (the sense they give their words, when not the literal one), after (what was said right after: context only),
+    context (the raw transcript around), captions (the TV captions of the passage), voices (the names the transcript can
+    attribute), channel, asserted_at (ISO 8601), order (google_first | linkup_first, else CHECK_ORDER)."""
+    started = time.perf_counter()
+    if client is None:
+        raise RuntimeError("Clé Gemini absente : renseigner API_GEMINI dans .env")
+    if not str(claim.get("claim") or "").strip():
+        return JSONResponse({"error": "claim manquant"}, status_code=400)
+    cid, text = str(claim.get("id") or ""), str(claim["claim"])
+    speaker, quote, meant = claim.get("speaker") or "", claim.get("quote") or "", claim.get("meant") or ""
+    after, captions = claim.get("after") or "", claim.get("captions") or ""
+    voices = [str(v).strip() for v in claim.get("voices") or [] if str(v).strip()]
+    asserted_at = datetime.fromisoformat(claim["asserted_at"]) if claim.get("asserted_at") else datetime.now(timezone.utc)
+    order = claim.get("order") if claim.get("order") in ORDERS else CHECK_ORDER if CHECK_ORDER in ORDERS else "google_first"
+    if not LINKUP_KEY:
+        order = "google_first"                       # no Linkup: Gemini's own search is all there is
+
+    # the check prompt, filled field by field in this order
+    prompt = prompts.CHECK
+    for name, value in (
+            ("captions", compact(captions, CAPTION_CHARS) if captions.strip() else "—"),
+            ("voices", ", ".join(voices) or "Liste des voix identifiables non disponible."),
+            ("source_list", SOURCE_LIST),
+            ("speaker", speaker or "l'orateur"),
+            ("quote", quote or "—"),
+            ("sentence", claim.get("sentence") or quote or "—"),
+            ("claim", text),
+            ("meant", meant or "(pas d'autre sens que le sens littéral)"),
+            ("after", compact(after, AFTER_CHARS) if after.strip() else "—"),
+            ("context", compact(claim.get("context") or "", CONTEXT_CHARS)),
+            ("channel", claim.get("channel") or "inconnue"),
+            ("when", (asserted_at if asserted_at.tzinfo else asserted_at.replace(tzinfo=timezone.utc)).astimezone(PARIS).strftime("%H:%M"))):
+        prompt = prompt.replace("{" + name + "}", str(value))
+
+    spent = {"input_tokens": 0, "output_tokens": 0, "searches": 0}
+    timings: dict[str, float] = {}
+    query, from_date, linkup_searches = "", None, 0
+
+    async def timed(label: str, work):
+        began = time.perf_counter()
+        try:
+            return await work
+        finally:
+            timings[label] = round(time.perf_counter() - began, 2)
+
+    async def find_pages() -> tuple[list[dict], str]:
+        """Linkup's pages for this claim, best tier first, and their numbered list for the prompt."""
+        nonlocal query, from_date, linkup_searches
+        # the query: an instruction written by the small model; the claim itself when it cannot be written
+        began, written_by = time.perf_counter(), "claim"
+        query = text
+        try:
+            answer = await gemini(prompts.QUERY.format(speaker=speaker or "l'orateur", when=asserted_at.date().isoformat(),
+                                                       claim=text, meant=meant or "(le sens littéral)", quote=quote or "—"),
+                                  QUERY_MODEL)
+        except Exception as exc:                                      # a better query is a bonus, never a failure
+            log.warning("Linkup query not written (%r): searching with the claim itself", exc)
+            answer = None
+        payload = answer["payload"] if answer and isinstance(answer["payload"], dict) else {}
+        written = " ".join(str(payload.get("query") or "").split())[:QUERY_CHARS]
+        if len(written) >= 20:
+            query, written_by = written, "llm"
+            # from_date: a real day before the claim, at most ten years back (the claim is about the present)
+            day = str(payload.get("from_date") or "").strip()
+            if isinstance(payload.get("from_date"), str) and re.fullmatch(r"\d{4}-\d{2}-\d{2}", day):
+                try:
+                    since = date.fromisoformat(day)
+                except ValueError:
+                    since = None
+                if since and asserted_at.date() - timedelta(days=3650) <= since < asserted_at.date():
+                    from_date = since.isoformat()
+        timings["query"] = round(time.perf_counter() - began, 2)
+        linkup_searches = 1
+        began = time.perf_counter()
+        body = {"q": query, "depth": "standard", "outputType": "searchResults", "maxResults": LINKUP_RESULTS,
+                "excludeDomains": LINKUP_EXCLUDE}
+        if from_date:
+            body["fromDate"] = from_date
+        try:
+            async with httpx.AsyncClient(timeout=20) as http:
+                r = await http.post(LINKUP_URL, headers={"Authorization": f"Bearer {LINKUP_KEY}"}, json=body)
+                r.raise_for_status()
+                results = r.json().get("results") or []
+        except (httpx.HTTPError, ValueError) as exc:                  # a failed search is just no extra evidence
+            log.warning("Linkup search failed: %r", exc)
+            results = []
+        pages = [{"title": str(item.get("name") or item.get("url") or "").strip(), "url": str(item.get("url") or ""),
+                  "content": " ".join(str(item.get("content") or "").split())[:SNIPPET_CHARS]}
+                 for item in results
+                 if item.get("type", "text") == "text" and urlparse(str(item.get("url") or "")).scheme in ("http", "https")]
+        pages = sorted(pages, key=lambda p: tier(p["url"]))[:LINKUP_PAGES]
+        timings["linkup"] = round(time.perf_counter() - began, 2)
+        log.info("claim %s: Linkup found %d pages (query by %s)", cid, len(pages), written_by)
+        listing = "\n".join(f"{i}. [{TIER_LABELS[tier(p['url'])]}] {p['title']}\n   {p['url']}\n   {p['content']}"
+                            for i, p in enumerate(pages, 1))
+        return pages, listing
+
+    async def attempt(label: str, full_prompt: str, thinking: str | None, pages: list[dict]) -> tuple[dict, list[dict]] | None:
+        """One Gemini call with Google Search (and URL reading when there are pages): (answer, sources), None if it failed.
+        The sources: the listed pages it cites (by number, or by URL however spelled; never a page we were not given),
+        then, only if it really searched, the URLs it found itself, then its grounding links."""
+        try:
+            result = await timed(label, gemini(full_prompt, MODEL, search=True, url_context=bool(pages), thinking=thinking))
+        except Exception:
+            log.exception("claim %s: the check failed (%s, thinking %s)", cid, label, thinking)
+            return None
+        for key in spent:
+            spent[key] += result[key]
+        payload = result["payload"]
+        if not isinstance(payload, dict):
+            return None
+        listed, cited = {same_page(p["url"]): p for p in pages}, []
+        for s in payload.get("sources") or []:
+            if not isinstance(s, dict):
+                continue
+            n = s.get("page")
+            page = (pages[n - 1] if isinstance(n, int) and not isinstance(n, bool) and 1 <= n <= len(pages)
+                    else listed.get(same_page(str(s.get("url") or s.get("uri") or ""))))
+            if page and page["url"] not in {c["url"] for c in cited}:
+                cited.append({"title": page["title"], "url": page["url"], "says": s.get("says") or ""})
+        have = {same_page(c["url"]) for c in cited}
+        written = [w for w in payload.get("sources") or []
+                   if isinstance(w, dict) and same_page(str(w.get("url") or "")) not in have] if result["searches"] > 0 else []
+        return payload, merge_sources(cited + written, result["grounding"])
+
+    payload, sources = None, []
+    if order == "linkup_first":
+        pages, listing = await find_pages()
+        full_prompt = prompt + prompts.PAGES_FIRST.format(pages=listing) if pages else prompt
+        for n, thinking in enumerate((None, "high"), 1):
+            answer = await attempt(f"gemini_{n}", full_prompt, thinking, pages)
+            if answer:
+                payload, sources = answer
+                if any(usable(s["url"]) for s in sources):
+                    break
+                log.info("claim %s: no usable source (linkup_first, thinking %s)", cid, thinking)
+    else:
+        # 1) Gemini + Google Search. Without a real search, the URLs it writes are from memory: not sources.
+        result = await timed("gemini_1", gemini(prompt, MODEL, search=True))
+        for key in spent:
+            spent[key] += result[key]
+        payload = result["payload"]
+        if not isinstance(payload, dict):
+            raise RuntimeError("Le fact-check n'a pas renvoyé un objet JSON")
+        sources = merge_sources(payload.get("sources") or [] if result["searches"] > 0 else [], result["grounding"])
+        # 2) no usable link: Linkup's pages, then Gemini again with its first answer and those pages, then once more thinking
+        #    harder; with no pages at all, once more thinking harder on the plain prompt.
+        if LINKUP_KEY and not any(usable(s["url"]) for s in sources):
+            pages, listing = await find_pages()
+            previous = {k: payload.get(k) for k in ("verdict", "explanation", "confidence")}
+            informed = prompt + prompts.LINKUP.format(previous=json.dumps(previous, ensure_ascii=False), pages=listing)
+            for n, (full_prompt, thinking) in enumerate([(informed, None), (informed, "high")] if pages else [(prompt, "high")], 2):
+                answer = await attempt(f"gemini_{n}", full_prompt, thinking, pages)
+                if not answer:
+                    continue
+                payload, sources = answer
+                if any(usable(s["url"]) for s in sources):
+                    break
+                log.info("claim %s: no usable source after the Linkup attempt (thinking %s)", cid, thinking)
+    if payload is None:
+        raise RuntimeError("Le fact-check n'a pas abouti (aucune réponse exploitable)")
+
+    # 3) still nothing usable: no source at all, never a homepage, never an invented link
+    sources = [s for s in sources if usable(s["url"])]
+
+    raw = str(payload.get("verdict") or "insuffisant").strip().lower().replace("-", "_").replace(" ", "_")
+    verdict = raw if raw in VERDICTS else VERDICT_ALIASES.get(raw.replace("_", " "), VERDICT_ALIASES.get(raw, "insuffisant"))
+    confidence = payload.get("confidence")
+    if isinstance(confidence, str):
+        confidence = confidence.replace("%", "").replace(",", ".").strip()
+    try:
+        confidence = float(confidence) if confidence not in (None, "") else 0.0
+    except (TypeError, ValueError):
+        confidence = 0.0
+    confidence = max(0.0, min(1.0, confidence / 100 if confidence > 1 else confidence))
+    own, faithful, scope_ok = (flag(payload.get(k)) for k in ("own", "faithful", "scope_ok"))
+    basis = str(payload.get("basis") or "").strip().lower() or None
+    evidence = str(payload.get("evidence") or "").strip().lower() or None
+
+    # the checker's own flags can only lower a verdict, and a missing flag is not a yes ("insuffisant" needs none)
+    guard = calibration = None
+    if verdict != "insuffisant":
+        if own is not True:
+            guard = "not_own_assertion" if own is False else "own_missing"
+        elif faithful is not True:
+            guard = "not_faithful" if faithful is False else "faithful_missing"
+        elif scope_ok is not True:
+            guard = "scope_not_meant" if scope_ok is False else "scope_missing"
+        elif basis != "external_facts":
+            guard = f"basis:{basis or 'missing'}"
+    if guard:
+        log.info("claim %s: verdict %s forced to insuffisant (%s)", cid, verdict, guard)
+        verdict = "insuffisant"
+    elif verdict != "insuffisant":
+        # what the verdict rests on decides how far it can go: not finding is not refuting, an inference is one notch lower
+        asked = verdict
+        if evidence == "absence":
+            verdict, guard = "insuffisant", "evidence:absence"
+        elif verdict in NEGATIVE and evidence not in ("direct", "inference"):
+            verdict, guard = "insuffisant", f"evidence:{evidence or 'missing'}"
+        elif verdict == "faux" and evidence == "inference":
+            verdict, calibration = "plutot_faux", "faux->plutot_faux (evidence: inference)"
+        if guard or calibration:
+            log.info("claim %s: verdict %s -> %s (%s)", cid, asked, verdict, guard or calibration)
+
+    return {
+        "verdict": verdict,
+        "explanation": str(payload.get("explanation") or "").strip(),
+        "confidence": confidence,
+        "meant": str(payload.get("meant") or meant or "").strip(),
+        "own": own, "faithful": faithful, "scope_ok": scope_ok, "basis": basis, "evidence": evidence,
+        "guard": guard, "calibration": calibration,
+        "review_status": "needs_review" if verdict == "insuffisant" or confidence < CONFIDENCE_THRESHOLD else "pending",
+        "sources": sources,
+        "model": f"gemini:{MODEL}",
+        "input_tokens": spent["input_tokens"], "output_tokens": spent["output_tokens"], "search_queries": spent["searches"],
+        "linkup_searches": linkup_searches,
+        "check_order": order, "linkup_query": query, "linkup_from_date": from_date,
+        "timings": timings,
+        "latency_ms": int((time.perf_counter() - started) * 1000),
+    }
+
+
+if __name__ == "__main__":
+    import uvicorn
+
+    uvicorn.run(app, host=HOST, port=PORT)
