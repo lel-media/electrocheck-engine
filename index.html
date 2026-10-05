@@ -53,7 +53,7 @@
 <body>
 <main>
   <h1>Electrocheck engine</h1>
-  <p class="lead">Vérifie une affirmation faite à la télévision : la phrase à vérifier, qui l'a dite et ses mots exacts. Une vérification prend de 10 secondes à une minute.</p>
+  <p class="lead">Vérifie une affirmation faite à la télévision : la phrase à vérifier, qui l'a dite et ses mots exacts. Une vérification prend de 10 secondes à deux minutes.</p>
 
   <form id="form">
     <label for="claim">Affirmation à vérifier <small>(une phrase autonome)</small></label>
@@ -62,7 +62,7 @@
     <div class="row">
       <div><label for="speaker">Orateur</label><input id="speaker" name="speaker"></div>
       <div><label for="channel">Chaîne</label><input id="channel" name="channel"></div>
-      <div><label for="asserted_at">Date et heure</label><input id="asserted_at" name="asserted_at" type="datetime-local"></div>
+      <div><label for="asserted_at">Date de l'émission</label><input id="asserted_at" name="asserted_at" type="date"></div>
     </div>
 
     <label for="quote">Mots exacts <small>(tels que prononcés)</small></label>
@@ -105,7 +105,7 @@ const VERDICTS = {
 const TIERS = { 1: "source primaire", 2: "grand média", 3: "autre source" };
 const EXAMPLE = {
   claim: "La proportion d'élèves issus de milieux défavorisés s'élève à 43 % dans les collèges publics et à 18 % dans les collèges privés.",
-  speaker: "Raphaël Glucksmann", channel: "France 2", asserted_at: "2026-10-01T21:06",
+  speaker: "Raphaël Glucksmann", channel: "France 2", asserted_at: "2026-10-01",
   quote: "dans un collège public aujourd'hui, il y a 43 pourcents d'élèves issus de milieux défavorisés, dans un collège privé, c'est 18 pourcents",
   sentence: "Vous savez que dans un collège public, dans un collège public aujourd'hui, il y a 43 pourcents d'élèves issus de milieux défavorisés, dans un collège privé, c'est 18 pourcents, et ça s'accroît, la différence s'accroît.",
 };
