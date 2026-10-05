@@ -117,6 +117,10 @@ def test_no_page_cited_means_one_more_try_thinking_harder(run):
     _, answer, _ = run(g, pages=PAGES)
     assert [c["thinking"] for c in g.calls] == [None, None, "high"] and g.calls[1]["prompt"] == g.calls[2]["prompt"]
     assert urls(answer) == ["https://www.lemonde.fr/b-é2.html"] and answer["input_tokens"] == 500
+    assert answer["attempts"] == [                                                  # every answer is kept, the replaced ones too
+        {"call": "gemini_1", "thinking": None, "verdict": "faux", "confidence": 0.6, "usable_sources": 0},
+        {"call": "gemini_2", "thinking": None, "verdict": "plutot_faux", "confidence": 0.9, "usable_sources": 0},
+        {"call": "gemini_3", "thinking": "high", "verdict": "plutot_faux", "confidence": 0.9, "usable_sources": 1}]
 
 
 def test_nothing_cited_even_thinking_harder_leaves_no_source(run):
@@ -154,6 +158,7 @@ def test_failed_attempts_fall_through_and_keep_the_first_answer(run):
     _, answer, _ = run(g, pages=PAGES)
     assert len(g.calls) == 3 and answer["sources"] == [] and answer["explanation"] == "de mémoire" and answer["input_tokens"] == 100
     assert set(answer["timings"]) == {"gemini_1", "query", "linkup", "gemini_2", "gemini_3"}       # a failed call is timed too
+    assert [a.get("failed") for a in answer["attempts"]] == [None, "quota", "quota"]
 
 
 def test_a_first_answer_that_is_not_an_object_is_an_error(run):
@@ -186,6 +191,7 @@ def test_linkup_first_tries_once_more_thinking_harder_when_no_page_is_cited(run)
     _, answer, _ = run(g, pages=PAGES, check_order="linkup_first", **FAURE)
     assert [c["thinking"] for c in g.calls] == [None, "high"] and g.calls[0]["prompt"] == g.calls[1]["prompt"]
     assert urls(answer) == ["https://www.lemonde.fr/b-é2.html"] and answer["input_tokens"] == 400
+    assert [(a["call"], a["thinking"], a["usable_sources"]) for a in answer["attempts"]] == [("gemini_1", None, 0), ("gemini_2", "high", 1)]
 
 
 def test_linkup_first_with_no_page_falls_back_to_gemini_alone(run):

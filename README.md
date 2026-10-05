@@ -121,6 +121,7 @@ The answer:
 | `sources` | `[{title, url, domain, tier, says}]`, best first; `says` is what the page establishes |
 | `check_order`, `linkup_query`, `linkup_from_date`, `linkup_searches` | how the sources were looked for |
 | `model`, `input_tokens`, `output_tokens`, `search_queries` | the model and what it used |
+| `attempts` | each Gemini check call, the replaced ones included: `{call, thinking, verdict, confidence, usable_sources}`, or `{call, thinking, failed}` |
 | `timings`, `latency_ms` | seconds per step, and in all |
 
 An error answers HTTP 500 with `{"error": "..."}` (400 when `claim` is missing).

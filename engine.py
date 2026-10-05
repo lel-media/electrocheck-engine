@@ -343,6 +343,7 @@ async def check(claim: dict) -> dict:
 
     spent = {"input_tokens": 0, "output_tokens": 0, "searches": 0}
     timings: dict[str, float] = {}
+    attempts: list[dict] = []          # what each Gemini check call answered, the ones later replaced included
     query, from_date, linkup_searches = "", None, 0
 
     async def timed(label: str, work):
@@ -410,13 +411,15 @@ async def check(claim: dict) -> dict:
         then, only if it really searched, the URLs it found itself, then its grounding links."""
         try:
             result = await timed(label, gemini(full_prompt, MODEL, search=True, url_context=bool(pages), thinking=thinking))
-        except Exception:
+        except Exception as exc:
             log.exception("claim %s: the check failed (%s, thinking %s)", cid, label, thinking)
+            attempts.append({"call": label, "thinking": thinking, "failed": str(exc)[:200]})
             return None
         for key in spent:
             spent[key] += result[key]
         payload = result["payload"]
         if not isinstance(payload, dict):
+            attempts.append({"call": label, "thinking": thinking, "failed": "pas un objet JSON"})
             return None
         listed, cited = {same_page(p["url"]): p for p in pages}, []
         for s in payload.get("sources") or []:
@@ -430,7 +433,10 @@ async def check(claim: dict) -> dict:
         have = {same_page(c["url"]) for c in cited}
         written = [w for w in payload.get("sources") or []
                    if isinstance(w, dict) and same_page(str(w.get("url") or "")) not in have] if result["searches"] > 0 else []
-        return payload, merge_sources(cited + written, result["grounding"])
+        merged = merge_sources(cited + written, result["grounding"])
+        attempts.append({"call": label, "thinking": thinking, "verdict": payload.get("verdict"), "confidence": payload.get("confidence"),
+                         "usable_sources": sum(usable(s["url"]) for s in merged)})
+        return payload, merged
 
     payload, sources = None, []
     if order == "linkup_first":
@@ -452,6 +458,8 @@ async def check(claim: dict) -> dict:
         if not isinstance(payload, dict):
             raise RuntimeError("Le fact-check n'a pas renvoyé un objet JSON")
         sources = merge_sources(payload.get("sources") or [] if result["searches"] > 0 else [], result["grounding"])
+        attempts.append({"call": "gemini_1", "thinking": None, "verdict": payload.get("verdict"), "confidence": payload.get("confidence"),
+                         "usable_sources": sum(usable(s["url"]) for s in sources)})
         # 2) no usable link: Linkup's pages, then Gemini again with its first answer and those pages, then once more thinking
         #    harder; with no pages at all, once more thinking harder on the plain prompt.
         if LINKUP_KEY and not any(usable(s["url"]) for s in sources):
@@ -526,6 +534,7 @@ async def check(claim: dict) -> dict:
         "linkup_searches": linkup_searches,
         "check_order": order, "linkup_query": query, "linkup_from_date": from_date,
         "timings": timings,
+        "attempts": attempts,
         "latency_ms": int((time.perf_counter() - started) * 1000),
     }
 
