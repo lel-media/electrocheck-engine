@@ -86,6 +86,7 @@ about 10 seconds to two minutes.
 | `quote` | their exact words |
 | `sentence` | the whole sentence around the exact words (and the one before) |
 | `meant` | the sense the speaker clearly gives their words, when it is not the literal one |
+| `before` | what was said right before (context only: the question asked, the topic) |
 | `after` | what was said right after (context only) |
 | `context` | the raw transcript around the claim |
 | `captions` | the TV captions of the passage |
@@ -226,6 +227,7 @@ Une vérification prend d'environ 10 secondes à deux minutes.
 | `quote` | ses mots exacts |
 | `sentence` | la phrase entière autour des mots exacts (et celle d'avant) |
 | `meant` | le sens que l'orateur donne clairement à ses mots, quand ce n'est pas le sens littéral |
+| `before` | ce qui a été dit juste avant (contexte seulement : la question posée, le sujet) |
 | `after` | ce qui a été dit juste après (contexte seulement) |
 | `context` | la transcription brute autour de l'affirmation |
 | `captions` | les sous-titres TV du passage |

@@ -74,6 +74,8 @@
       <textarea id="sentence" name="sentence"></textarea>
       <label for="meant">Sens que l'orateur donne à ses mots <small>(s'il diffère du sens littéral)</small></label>
       <input id="meant" name="meant">
+      <label for="before">Dit juste avant <small>(la question posée, le sujet)</small></label>
+      <textarea id="before" name="before"></textarea>
       <label for="after">Dit juste après</label>
       <textarea id="after" name="after"></textarea>
       <label for="context">Transcription autour</label>
@@ -106,6 +108,7 @@ const TIERS = { 1: "source primaire", 2: "grand média", 3: "autre source" };
 const EXAMPLE = {
   claim: "La proportion d'élèves issus de milieux défavorisés s'élève à 43 % dans les collèges publics et à 18 % dans les collèges privés.",
   speaker: "Raphaël Glucksmann", channel: "France 2", asserted_at: "2026-10-01",
+  before: "[Animateur] C'est un constat sur le creusement des inégalités. Donnez-nous une mesure qui permet de les réduire.",
   quote: "dans un collège public aujourd'hui, il y a 43 pourcents d'élèves issus de milieux défavorisés, dans un collège privé, c'est 18 pourcents",
   sentence: "Vous savez que dans un collège public, dans un collège public aujourd'hui, il y a 43 pourcents d'élèves issus de milieux défavorisés, dans un collège privé, c'est 18 pourcents, et ça s'accroît, la différence s'accroît.",
 };

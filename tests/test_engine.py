@@ -351,8 +351,19 @@ def test_missing_fields_take_their_defaults(run):
 def test_long_context_is_cut_at_a_word(run):
     g = Gemini(reply(FIRST, GROUNDING, queries=1))
     run(g, linkup_key="", context="mot " * 300, after="  ")
-    assert "Contexte compact : " + ("mot " * 129).strip() + "…\n" in g.calls[0]["prompt"]
+    assert "Contexte compact : " + ("mot " * 199).strip() + "…\n" in g.calls[0]["prompt"]
     assert "Dit juste après (contexte seulement, n'en tire aucune autre affirmation) : —" in g.calls[0]["prompt"]
+    assert "Dit juste avant (contexte seulement, n'en tire aucune autre affirmation) : —\n" in g.calls[0]["prompt"]
+
+
+def test_what_was_said_before_comes_first_and_keeps_its_end(run):
+    g = Gemini(reply(FIRST, GROUNDING, queries=1))
+    question = "[Animateur] Vous dites que les retraités sont les plus pauvres d'Europe ?"
+    run(g, linkup_key="", before="début " * 200 + question, quote="Non, c'est l'inverse")
+    prompt = g.calls[0]["prompt"]
+    line = prompt.split("Dit juste avant (contexte seulement, n'en tire aucune autre affirmation) : ")[1].split("\n")[0]
+    assert line.startswith("…début") and line.endswith(question) and len(line) <= 800      # the question, right before the claim
+    assert prompt.index("Dit juste avant") < prompt.index("Propos exacts de l'orateur : « Non, c'est l'inverse »")
 
 
 # ---------------------------------------------------------------- Gemini's answers

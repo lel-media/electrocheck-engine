@@ -127,7 +127,8 @@ VERDICT_ALIASES = {"true": "vrai", "false": "faux", "mostly true": "plutot_vrai"
                    "plutot faux": "plutot_faux", "à relire": "insuffisant", "indetermine": "insuffisant", "indéterminé": "insuffisant"}
 NEGATIVE = ("faux", "plutot_faux", "mixte")
 CAPTION_CHARS = 800           # the captions given to the check
-CONTEXT_CHARS = 520           # the raw transcript around the claim
+CONTEXT_CHARS = 800           # the raw transcript around the claim (a whole transcript window: up to about 750)
+BEFORE_CHARS = 800            # what was said right before the claim: its end is kept
 AFTER_CHARS = 800             # what was said right after the claim
 SAYS_CHARS = 400              # what a source says, in the answer
 JSON_ATTEMPTS = 2             # a JSON-only answer with a stray character is asked again: the same prompt almost always comes back clean
@@ -137,10 +138,14 @@ MONTHS = ("janvier", "février", "mars", "avril", "mai", "juin", "juillet", "ao�
 
 # ---------------------------------------------------------------- the few things done more than once
 
-def compact(text: str, limit: int) -> str:
-    """One line of at most `limit` characters, cut at a word, "…" when cut."""
+def compact(text: str, limit: int, keep_end: bool = False) -> str:
+    """One line of at most `limit` characters, cut at a word, "…" where it was cut: its start is kept, or its end."""
     cleaned = re.sub(r"\s+", " ", text).strip()
-    return cleaned if len(cleaned) <= limit else cleaned[: limit - 1].rsplit(" ", 1)[0] + "…"
+    if len(cleaned) <= limit:
+        return cleaned
+    if keep_end:
+        return "…" + cleaned[-(limit - 1):].split(" ", 1)[-1]
+    return cleaned[: limit - 1].rsplit(" ", 1)[0] + "…"
 
 
 def parse_json(text: str):
@@ -290,9 +295,9 @@ async def page() -> FileResponse:
 async def check(claim: dict) -> dict:
     """One claim -> its verdict. Fields (only "claim" is required):
     claim (the sentence to check), speaker, quote (their exact words), sentence (the whole sentence around them), meant (the
-    sense they give their words, when not the literal one), after (what was said right after: context only), context (the
-    raw transcript around), captions (the TV captions of the passage), voices (the names the transcript can attribute),
-    channel, asserted_at (ISO 8601), order (google_first | linkup_first, else CHECK_ORDER)."""
+    sense they give their words, when not the literal one), before / after (what was said right before / after: context
+    only), context (the raw transcript around), captions (the TV captions of the passage), voices (the names the
+    transcript can attribute), channel, asserted_at (ISO 8601), order (google_first | linkup_first, else CHECK_ORDER)."""
     if client is None:
         raise RuntimeError("Clé Gemini absente : renseigner API_GEMINI dans .env")
     if not str(claim.get("claim") or "").strip():
@@ -300,7 +305,7 @@ async def check(claim: dict) -> dict:
     text = str(claim["claim"])
     said = text[:60]                                     # names the claim in the log
     speaker, quote, meant = claim.get("speaker") or "", claim.get("quote") or "", claim.get("meant") or ""
-    after, captions = claim.get("after") or "", claim.get("captions") or ""
+    before, after, captions = claim.get("before") or "", claim.get("after") or "", claim.get("captions") or ""
     voices = [str(v).strip() for v in claim.get("voices") or [] if str(v).strip()]
     asserted_at = datetime.fromisoformat(claim["asserted_at"]) if claim.get("asserted_at") else datetime.now(timezone.utc)
     day = (asserted_at if asserted_at.tzinfo else asserted_at.replace(tzinfo=timezone.utc)).astimezone(PARIS).date()
@@ -320,6 +325,7 @@ async def check(claim: dict) -> dict:
             ("claim", text),
             ("meant", meant or "(pas d'autre sens que le sens littéral)"),
             ("after", compact(after, AFTER_CHARS) if after.strip() else "—"),
+            ("before", compact(before, BEFORE_CHARS, keep_end=True) if before.strip() else "—"),
             ("context", compact(claim.get("context") or "", CONTEXT_CHARS)),
             ("channel", claim.get("channel") or "inconnue"),
             ("when", f"{day.day} {MONTHS[day.month - 1]} {day.year}")):         # "aujourd'hui" is judged against this day

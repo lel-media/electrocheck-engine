@@ -16,6 +16,7 @@ organismes internationaux, recherche publique, Our World in Data) ; 2) grands m�
 sites divers). Les articles de presse peuvent contextualiser, mais ne doivent pas être la source principale si une
 source primaire couvre le sujet. Si aucune source de la liste ne convient, élargis ensuite la recherche.
 
+Dit juste avant (contexte seulement, n'en tire aucune autre affirmation) : {before}
 Propos exacts de {speaker} : « {quote} »
 Phrase où ils ont été dits : « {sentence} »
 Affirmation à vérifier (reformulation de ces propos) : {claim}
@@ -23,7 +24,8 @@ Sens que {speaker} leur donne (proposé par l'extraction) : {meant}
 Dit juste après (contexte seulement, n'en tire aucune autre affirmation) : {after}
 
 Règles :
-- Juge l'affirmation dans le SENS que {speaker} lui donne clairement, vu la phrase entière et ce qui suit, pas dans un
+- Juge l'affirmation dans le SENS que {speaker} lui donne clairement, vu ce qui a été dit juste avant (la question posée, le
+  sujet), la phrase entière et ce qui suit, pas dans un
   sens littéral ou technique qu'il ne lui donne pas : une formule (« je n'ai jamais… », « au bord de la faillite »)
   se vérifie pour ce qu'elle veut dire. Si ce sens est exact mais que la lettre est fausse (ou l'inverse), c'est
   "mixte". Écris dans "meant" le sens que tu as jugé. Exemple : « Personne ne parle jamais des agriculteurs », dit en
