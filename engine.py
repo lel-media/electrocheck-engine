@@ -21,7 +21,6 @@ import json
 import logging
 import os
 import re
-import time
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import unquote, urlparse
@@ -50,7 +49,6 @@ MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.8-flash")           # the check
 QUERY_MODEL = os.environ.get("GEMINI_PREFLIGHT_MODEL", "gemini-3.5-flash-lite")   # the Linkup query
 API_VERSION = os.environ.get("GEMINI_API_VERSION", "v1")
 CHECK_ORDER = os.environ.get("CHECK_ORDER", "google_first")         # google_first | linkup_first
-CONFIDENCE_THRESHOLD = float(os.environ.get("CONFIDENCE_THRESHOLD", "0.7"))     # under it, the verdict is to be reviewed
 HOST = os.environ.get("HOST", "127.0.0.1")
 PORT = int(os.environ.get("PORT", "8050"))
 
@@ -89,9 +87,9 @@ SOURCE_LIST = "\n".join(f"- {name} ({domain}) — {url}" for (name, url), domain
 # Data), 2 big newspapers and well-known media, 3 the rest. A domain matches itself and its subdomains.
 FIRST_PARTY = tuple(url.split("//", 1)[1].split("/", 1)[0].removeprefix("www.") for _, url in CATALOG) + (
     "ec.europa.eu", "europa.eu", "dares.travail-emploi.gouv.fr", "drees.solidarites-sante.gouv.fr", "ined.fr", "inrae.fr",
-    "cnrs.fr", "cepii.fr", "strategie.gouv.fr", "cae-eco.fr", "cor-retraites.fr", "ademe.fr", "insee.fr", "conseil-constitutionnel.fr",
+    "cnrs.fr", "cepii.fr", "strategie.gouv.fr", "cae-eco.fr", "cor-retraites.fr", "ademe.fr", "conseil-constitutionnel.fr",
     "conseil-etat.fr", "elysee.fr", "info.gouv.fr", "service-public.fr", "fondsdereserve.fr", "securite-sociale.fr", "urssaf.fr",
-    "francetravail.fr", "ifop.com", "elabe.fr", "ipsos.com", "un.org", "who.int", "ilo.org", "imf.org", "wto.org", "ecb.europa.eu",
+    "francetravail.fr", "ifop.com", "elabe.fr", "ipsos.com", "un.org", "who.int", "ilo.org", "wto.org", "ecb.europa.eu",
     "kielinstitut.de", "ifw-kiel.de", "sipri.org", "iea.org", "europarl.europa.eu", "consilium.europa.eu",
 )
 FIRST_PARTY_SUFFIXES = (".gouv.fr", ".europa.eu", ".int", ".un.org", ".gov", ".gov.uk", ".admin.ch")
@@ -145,35 +143,25 @@ def compact(text: str, limit: int) -> str:
 
 
 def parse_json(text: str):
-    """The JSON object (or array) of a model's answer, even inside a ```json fence or some prose."""
+    """The JSON of a model's answer, even inside a ```json fence or some prose around one object."""
     cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", text.strip(), flags=re.IGNORECASE).strip()
     try:
         return json.loads(cleaned)
     except json.JSONDecodeError:
         pass
-    for opener, closer in (("{", "}"), ("[", "]")):
-        start, end = cleaned.find(opener), cleaned.rfind(closer)
-        if start != -1 and end > start:
-            try:
-                return json.loads(cleaned[start : end + 1])
-            except json.JSONDecodeError:
-                continue
+    start, end = cleaned.find("{"), cleaned.rfind("}")
+    if start != -1 and end > start:
+        try:
+            return json.loads(cleaned[start : end + 1])
+        except json.JSONDecodeError:
+            pass
     raise ValueError("Réponse LLM sans JSON exploitable")
 
 
-def tokens(response) -> tuple[int, int]:
-    """(input, output) tokens of a Gemini response: the prompt and the tool results in, the answer and the thinking out."""
-    meta = getattr(response, "usage_metadata", None)
-    if not meta:
-        return 0, 0
-    return (int(getattr(meta, "prompt_token_count", 0) or 0) + int(getattr(meta, "tool_use_prompt_token_count", 0) or 0),
-            int(getattr(meta, "candidates_token_count", 0) or 0) + int(getattr(meta, "thoughts_token_count", 0) or 0))
-
-
 async def gemini(prompt: str, model: str, *, search: bool = False, url_context: bool = False, thinking: str | None = None) -> dict:
-    """One Gemini answer: {"payload", "grounding" (the links of its Google searches), "input_tokens", "output_tokens",
-    "searches" (distinct Google queries, the billed unit)}. With search the answer is free text that must hold JSON; without,
-    JSON is enforced and asked again once when it comes back empty or broken."""
+    """One Gemini answer: {"payload", "grounding" (the links of its Google searches), "searched" (it really searched: only
+    then do the URLs it writes count)}. With search the answer is free text that must hold JSON; without, JSON is enforced
+    and asked again once when it comes back empty or broken."""
     config = {"temperature": 0.1}
     if thinking:
         config["thinking_config"] = types.ThinkingConfig(thinking_level=thinking.upper())
@@ -184,11 +172,8 @@ async def gemini(prompt: str, model: str, *, search: bool = False, url_context: 
         config["response_mime_type"] = "application/json"
     config = types.GenerateContentConfig(**config)
     if not search:
-        spent_in = spent_out = 0                     # a failed attempt costs tokens too
         for attempt in range(1, JSON_ATTEMPTS + 1):
             response = await client.aio.models.generate_content(model=model, contents=prompt, config=config)
-            used_in, used_out = tokens(response)
-            spent_in, spent_out = spent_in + used_in, spent_out + used_out
             text = (response.text or "").strip()
             last = attempt == JSON_ATTEMPTS
             if not text:
@@ -197,8 +182,7 @@ async def gemini(prompt: str, model: str, *, search: bool = False, url_context: 
                 log.warning("Réponse Gemini vide, nouvel essai")
                 continue
             try:
-                return {"payload": parse_json(text), "grounding": [], "input_tokens": spent_in, "output_tokens": spent_out,
-                        "searches": 0}
+                return {"payload": parse_json(text), "grounding": [], "searched": False}
             except ValueError:
                 if last:
                     raise
@@ -208,29 +192,27 @@ async def gemini(prompt: str, model: str, *, search: bool = False, url_context: 
     text = (response.text or "").strip()
     if not text:
         raise RuntimeError("Réponse Gemini vide")
-    spent_in, spent_out = tokens(response)
-    grounding, queries, chunks = [], set(), 0
+    grounding, searched = [], False
     for candidate in getattr(response, "candidates", None) or []:
         meta = getattr(candidate, "grounding_metadata", None)
         if not meta:
             continue
-        queries |= {str(q or "").strip() for q in getattr(meta, "web_search_queries", None) or []} - {""}
-        chunks += len(getattr(meta, "grounding_chunks", None) or [])
+        # a search query, or grounding links without any (they come from a search too)
+        queries = [q for q in getattr(meta, "web_search_queries", None) or [] if str(q or "").strip()]
+        searched = searched or bool(queries) or bool(getattr(meta, "grounding_chunks", None))
         for chunk in getattr(meta, "grounding_chunks", None) or []:
             web = getattr(chunk, "web", None)
             url = str(getattr(web, "uri", "") or "") if web else ""
             if url and url not in {g["url"] for g in grounding}:
                 grounding.append({"title": str(getattr(web, "title", "") or url), "url": url})
-    searches = len(queries) or (1 if chunks else 0)
     try:
         payload = parse_json(text)
     except ValueError:
         repaired = await client.aio.models.generate_content(
             model=model, contents=prompts.JSON_REPAIR + text,
             config=types.GenerateContentConfig(temperature=0, response_mime_type="application/json"))
-        extra_in, extra_out = tokens(repaired)
-        payload, spent_in, spent_out = parse_json((repaired.text or "").strip()), spent_in + extra_in, spent_out + extra_out
-    return {"payload": payload, "grounding": grounding, "input_tokens": spent_in, "output_tokens": spent_out, "searches": searches}
+        payload = parse_json((repaired.text or "").strip())
+    return {"payload": payload, "grounding": grounding, "searched": searched}
 
 
 def domain(url: str) -> str:
@@ -266,7 +248,7 @@ def merge_sources(written: list, grounding: list[dict]) -> list[dict]:
     for raw in list(written or []) + grounding:
         if not isinstance(raw, dict):
             continue
-        url = str(raw.get("url") or raw.get("uri") or "").strip()
+        url = str(raw.get("url") or "").strip()
         title = str(raw.get("title") or url).strip()
         if not url or url in seen:
             continue
@@ -306,16 +288,16 @@ async def page() -> FileResponse:
 @app.post("/check")
 async def check(claim: dict) -> dict:
     """One claim -> its verdict. Fields (only "claim" is required):
-    id, claim (the sentence to check), speaker, quote (their exact words), sentence (the whole sentence around them),
-    meant (the sense they give their words, when not the literal one), after (what was said right after: context only),
-    context (the raw transcript around), captions (the TV captions of the passage), voices (the names the transcript can
-    attribute), channel, asserted_at (ISO 8601), order (google_first | linkup_first, else CHECK_ORDER)."""
-    started = time.perf_counter()
+    claim (the sentence to check), speaker, quote (their exact words), sentence (the whole sentence around them), meant (the
+    sense they give their words, when not the literal one), after (what was said right after: context only), context (the
+    raw transcript around), captions (the TV captions of the passage), voices (the names the transcript can attribute),
+    channel, asserted_at (ISO 8601), order (google_first | linkup_first, else CHECK_ORDER)."""
     if client is None:
         raise RuntimeError("Clé Gemini absente : renseigner API_GEMINI dans .env")
     if not str(claim.get("claim") or "").strip():
         return JSONResponse({"error": "claim manquant"}, status_code=400)
-    cid, text = str(claim.get("id") or ""), str(claim["claim"])
+    text = str(claim["claim"])
+    said = text[:60]                                     # names the claim in the log
     speaker, quote, meant = claim.get("speaker") or "", claim.get("quote") or "", claim.get("meant") or ""
     after, captions = claim.get("after") or "", claim.get("captions") or ""
     voices = [str(v).strip() for v in claim.get("voices") or [] if str(v).strip()]
@@ -341,24 +323,12 @@ async def check(claim: dict) -> dict:
             ("when", (asserted_at if asserted_at.tzinfo else asserted_at.replace(tzinfo=timezone.utc)).astimezone(PARIS).strftime("%H:%M"))):
         prompt = prompt.replace("{" + name + "}", str(value))
 
-    spent = {"input_tokens": 0, "output_tokens": 0, "searches": 0}
-    timings: dict[str, float] = {}
     attempts: list[dict] = []          # what each Gemini check call answered, the ones later replaced included
-    query, from_date, linkup_searches = "", None, 0
-
-    async def timed(label: str, work):
-        began = time.perf_counter()
-        try:
-            return await work
-        finally:
-            timings[label] = round(time.perf_counter() - began, 2)
 
     async def find_pages() -> tuple[list[dict], str]:
         """Linkup's pages for this claim, best tier first, and their numbered list for the prompt."""
-        nonlocal query, from_date, linkup_searches
         # the query: an instruction written by the small model; the claim itself when it cannot be written
-        began, written_by = time.perf_counter(), "claim"
-        query = text
+        query, from_date, written_by = text, None, "claim"
         try:
             answer = await gemini(prompts.QUERY.format(speaker=speaker or "l'orateur", when=asserted_at.date().isoformat(),
                                                        claim=text, meant=meant or "(le sens littéral)", quote=quote or "—"),
@@ -379,9 +349,6 @@ async def check(claim: dict) -> dict:
                     since = None
                 if since and asserted_at.date() - timedelta(days=3650) <= since < asserted_at.date():
                     from_date = since.isoformat()
-        timings["query"] = round(time.perf_counter() - began, 2)
-        linkup_searches = 1
-        began = time.perf_counter()
         body = {"q": query, "depth": "standard", "outputType": "searchResults", "maxResults": LINKUP_RESULTS,
                 "excludeDomains": LINKUP_EXCLUDE}
         if from_date:
@@ -399,8 +366,7 @@ async def check(claim: dict) -> dict:
                  for item in results
                  if item.get("type", "text") == "text" and urlparse(str(item.get("url") or "")).scheme in ("http", "https")]
         pages = sorted(pages, key=lambda p: tier(p["url"]))[:LINKUP_PAGES]
-        timings["linkup"] = round(time.perf_counter() - began, 2)
-        log.info("claim %s: Linkup found %d pages (query by %s)", cid, len(pages), written_by)
+        log.info("%s: Linkup found %d pages (query by %s)", said, len(pages), written_by)
         listing = "\n".join(f"{i}. [{TIER_LABELS[tier(p['url'])]}] {p['title']}\n   {p['url']}\n   {p['content']}"
                             for i, p in enumerate(pages, 1))
         return pages, listing
@@ -410,13 +376,11 @@ async def check(claim: dict) -> dict:
         The sources: the listed pages it cites (by number, or by URL however spelled; never a page we were not given),
         then, only if it really searched, the URLs it found itself, then its grounding links."""
         try:
-            result = await timed(label, gemini(full_prompt, MODEL, search=True, url_context=bool(pages), thinking=thinking))
+            result = await gemini(full_prompt, MODEL, search=True, url_context=bool(pages), thinking=thinking)
         except Exception as exc:
-            log.exception("claim %s: the check failed (%s, thinking %s)", cid, label, thinking)
+            log.exception("%s: the check failed (%s, thinking %s)", said, label, thinking)
             attempts.append({"call": label, "thinking": thinking, "failed": str(exc)[:200]})
             return None
-        for key in spent:
-            spent[key] += result[key]
         payload = result["payload"]
         if not isinstance(payload, dict):
             attempts.append({"call": label, "thinking": thinking, "failed": "pas un objet JSON"})
@@ -427,12 +391,12 @@ async def check(claim: dict) -> dict:
                 continue
             n = s.get("page")
             page = (pages[n - 1] if isinstance(n, int) and not isinstance(n, bool) and 1 <= n <= len(pages)
-                    else listed.get(same_page(str(s.get("url") or s.get("uri") or ""))))
+                    else listed.get(same_page(str(s.get("url") or ""))))
             if page and page["url"] not in {c["url"] for c in cited}:
                 cited.append({"title": page["title"], "url": page["url"], "says": s.get("says") or ""})
         have = {same_page(c["url"]) for c in cited}
         written = [w for w in payload.get("sources") or []
-                   if isinstance(w, dict) and same_page(str(w.get("url") or "")) not in have] if result["searches"] > 0 else []
+                   if isinstance(w, dict) and same_page(str(w.get("url") or "")) not in have] if result["searched"] else []
         merged = merge_sources(cited + written, result["grounding"])
         attempts.append({"call": label, "thinking": thinking, "verdict": payload.get("verdict"), "confidence": payload.get("confidence"),
                          "usable_sources": sum(usable(s["url"]) for s in merged)})
@@ -448,16 +412,14 @@ async def check(claim: dict) -> dict:
                 payload, sources = answer
                 if any(usable(s["url"]) for s in sources):
                     break
-                log.info("claim %s: no usable source (linkup_first, thinking %s)", cid, thinking)
+                log.info("%s: no usable source (linkup_first, thinking %s)", said, thinking)
     else:
         # 1) Gemini + Google Search. Without a real search, the URLs it writes are from memory: not sources.
-        result = await timed("gemini_1", gemini(prompt, MODEL, search=True))
-        for key in spent:
-            spent[key] += result[key]
+        result = await gemini(prompt, MODEL, search=True)
         payload = result["payload"]
         if not isinstance(payload, dict):
             raise RuntimeError("Le fact-check n'a pas renvoyé un objet JSON")
-        sources = merge_sources(payload.get("sources") or [] if result["searches"] > 0 else [], result["grounding"])
+        sources = merge_sources(payload.get("sources") or [] if result["searched"] else [], result["grounding"])
         attempts.append({"call": "gemini_1", "thinking": None, "verdict": payload.get("verdict"), "confidence": payload.get("confidence"),
                          "usable_sources": sum(usable(s["url"]) for s in sources)})
         # 2) no usable link: Linkup's pages, then Gemini again with its first answer and those pages, then once more thinking
@@ -473,7 +435,7 @@ async def check(claim: dict) -> dict:
                 payload, sources = answer
                 if any(usable(s["url"]) for s in sources):
                     break
-                log.info("claim %s: no usable source after the Linkup attempt (thinking %s)", cid, thinking)
+                log.info("%s: no usable source after the Linkup attempt (thinking %s)", said, thinking)
     if payload is None:
         raise RuntimeError("Le fact-check n'a pas abouti (aucune réponse exploitable)")
 
@@ -495,7 +457,7 @@ async def check(claim: dict) -> dict:
     evidence = str(payload.get("evidence") or "").strip().lower() or None
 
     # the checker's own flags can only lower a verdict, and a missing flag is not a yes ("insuffisant" needs none)
-    guard = calibration = None
+    guard = None
     if verdict != "insuffisant":
         if own is not True:
             guard = "not_own_assertion" if own is False else "own_missing"
@@ -506,7 +468,7 @@ async def check(claim: dict) -> dict:
         elif basis != "external_facts":
             guard = f"basis:{basis or 'missing'}"
     if guard:
-        log.info("claim %s: verdict %s forced to insuffisant (%s)", cid, verdict, guard)
+        log.info("%s: verdict %s forced to insuffisant (%s)", said, verdict, guard)
         verdict = "insuffisant"
     elif verdict != "insuffisant":
         # what the verdict rests on decides how far it can go: not finding is not refuting, an inference is one notch lower
@@ -516,26 +478,18 @@ async def check(claim: dict) -> dict:
         elif verdict in NEGATIVE and evidence not in ("direct", "inference"):
             verdict, guard = "insuffisant", f"evidence:{evidence or 'missing'}"
         elif verdict == "faux" and evidence == "inference":
-            verdict, calibration = "plutot_faux", "faux->plutot_faux (evidence: inference)"
-        if guard or calibration:
-            log.info("claim %s: verdict %s -> %s (%s)", cid, asked, verdict, guard or calibration)
+            verdict = "plutot_faux"
+        if verdict != asked:
+            log.info("%s: verdict %s -> %s (%s)", said, asked, verdict, guard or "evidence: inference")
 
     return {
         "verdict": verdict,
         "explanation": str(payload.get("explanation") or "").strip(),
         "confidence": confidence,
         "meant": str(payload.get("meant") or meant or "").strip(),
-        "own": own, "faithful": faithful, "scope_ok": scope_ok, "basis": basis, "evidence": evidence,
-        "guard": guard, "calibration": calibration,
-        "review_status": "needs_review" if verdict == "insuffisant" or confidence < CONFIDENCE_THRESHOLD else "pending",
+        "guard": guard,
         "sources": sources,
-        "model": f"gemini:{MODEL}",
-        "input_tokens": spent["input_tokens"], "output_tokens": spent["output_tokens"], "search_queries": spent["searches"],
-        "linkup_searches": linkup_searches,
-        "check_order": order, "linkup_query": query, "linkup_from_date": from_date,
-        "timings": timings,
         "attempts": attempts,
-        "latency_ms": int((time.perf_counter() - started) * 1000),
     }
 
 

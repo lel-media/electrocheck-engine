@@ -103,7 +103,6 @@ const VERDICTS = {
   plutot_faux: ["Plutôt faux", "--mostly-false"], faux: ["Faux", "--false"], insuffisant: ["Insuffisant", "--unknown"],
 };
 const TIERS = { 1: "source primaire", 2: "grand média", 3: "autre source" };
-const FLAGS = { own: "propos de l'orateur", faithful: "reformulation fidèle", scope_ok: "sens voulu jugé" };
 const EXAMPLE = {
   claim: "La proportion d'élèves issus de milieux défavorisés s'élève à 43 % dans les collèges publics et à 18 % dans les collèges privés.",
   speaker: "Raphaël Glucksmann", channel: "France 2", asserted_at: "2026-10-01T21:06",
@@ -130,12 +129,13 @@ form.addEventListener("submit", async (event) => {
   if (body.asserted_at) body.asserted_at = new Date(body.asserted_at).toISOString();
   go.disabled = true;
   go.textContent = "Vérification…";
+  const started = performance.now();
   result.hidden = false;
   result.innerHTML = '<p class="meta">Recherche des sources et vérification en cours…</p>';
   try {
     const res = await fetch("check", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
     const data = await res.json();
-    result.innerHTML = res.ok ? render(data) : `<p class="error">Erreur : ${esc(data.error || res.status)}</p>`;
+    result.innerHTML = res.ok ? render(data, (performance.now() - started) / 1000) : `<p class="error">Erreur : ${esc(data.error || res.status)}</p>`;
   } catch (err) {
     result.innerHTML = `<p class="error">Erreur : ${esc(err.message)}</p>`;
   } finally {
@@ -144,24 +144,23 @@ form.addEventListener("submit", async (event) => {
   }
 });
 
-function render(d) {
+function render(d, seconds) {
   const [label, color] = VERDICTS[d.verdict] || [d.verdict, "--unknown"];
-  const flags = Object.entries(FLAGS).map(([k, text]) => `<li class="${d[k] === true ? "" : "bad"}">${esc(text)} : ${d[k] === true ? "oui" : d[k] === false ? "non" : "?"}</li>`);
-  flags.push(`<li class="${d.basis === "external_facts" ? "" : "bad"}">repose sur : ${esc(d.basis || "?")}</li>`);
-  flags.push(`<li>preuve : ${esc(d.evidence || "?")}</li>`);
-  if (d.guard) flags.push(`<li class="bad">ramené à « insuffisant » : ${esc(d.guard)}</li>`);
-  if (d.calibration) flags.push(`<li class="bad">abaissé : ${esc(d.calibration)}</li>`);
+  const flags = d.guard ? [`<li class="bad">ramené à « insuffisant » : ${esc(d.guard)}</li>`] : [];
+  for (const a of d.attempts) {
+    flags.push(a.failed ? `<li class="bad">${esc(a.call)} : échec (${esc(a.failed)})</li>`
+      : `<li>${esc(a.call)}${a.thinking ? " (réflexion " + esc(a.thinking) + ")" : ""} : ${esc(a.verdict)}, ${esc(a.usable_sources)} source(s)</li>`);
+  }
   const sources = d.sources.length
     ? `<ol class="sources">${d.sources.map(s => `<li><a href="${esc(s.url)}" target="_blank" rel="noopener noreferrer">${esc(s.title)}</a>
          <span class="tier">· ${esc(s.domain)} · ${esc(TIERS[s.tier] || "")}</span>${s.says ? `<br>${esc(s.says)}` : ""}</li>`).join("")}</ol>`
     : '<p class="meta">Aucune source exploitable.</p>';
   return `<span class="verdict" style="background: var(${color})">${esc(label)}</span>
-    <p class="meta">Confiance ${Math.round(d.confidence * 100)} % · ${esc(d.check_order)} · ${(d.latency_ms / 1000).toFixed(1)} s</p>
+    <p class="meta">Confiance ${Math.round(d.confidence * 100)} % · ${seconds.toFixed(1)} s</p>
     <p>${esc(d.explanation)}</p>
     ${d.meant ? `<p class="meta">Sens jugé : ${esc(d.meant)}</p>` : ""}
     <ul class="flags">${flags.join("")}</ul>
     <h2 style="font-size:1.05rem">Sources</h2>${sources}
-    ${d.linkup_query ? `<details><summary>Requête Linkup</summary><pre>${esc(d.linkup_query)}${d.linkup_from_date ? `\ndepuis le ${esc(d.linkup_from_date)}` : ""}</pre></details>` : ""}
     <details><summary>Réponse complète (JSON)</summary><pre>${esc(JSON.stringify(d, null, 2))}</pre></details>`;
 }
 </script>

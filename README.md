@@ -22,7 +22,7 @@ live transcription and the extraction, is not in this repository).
    Sources are ranked: 1 primary (official statistics, institutions, parliaments, international bodies, public research),
    2 major media, 3 the rest. Social networks and video sites are excluded from the search.
 2. **The model's answer.** A verdict (`vrai`, `plutot_vrai`, `mixte`, `plutot_faux`, `faux`, `insuffisant`), an
-   explanation whose every fact comes from a cited source, and flags on how it judged:
+   explanation whose every fact comes from a cited source, and flags on how it judged (read by the code, not returned):
    - `own`: the words are the speaker's own assertion, not a quote they rebut, a hypothesis or a promise;
    - `faithful`: the claim says neither more nor less than the exact words;
    - `scope_ok`: the verdict judges the sense the speaker meant, not a literal reading they did not intend;
@@ -30,7 +30,7 @@ live transcription and the extraction, is not in this repository).
    - `evidence`: a source says it directly, the verdict is inferred, or nothing was found.
 3. **The code has the last word.** Any flag that is false or missing turns the verdict into `insuffisant`
    (`guard` says why). Not finding is not refuting: a verdict resting on nothing found is `insuffisant`, a negative
-   verdict needs direct or inferred evidence, and an inferred `faux` is lowered to `plutot_faux` (`calibration`).
+   verdict needs direct or inferred evidence, and an inferred `faux` is lowered to `plutot_faux`.
 
 ## Setup
 
@@ -48,7 +48,6 @@ Python 3.12 or later.
 | `GEMINI_MODEL` | `gemini-3.8-flash` | the model that checks |
 | `GEMINI_PREFLIGHT_MODEL` | `gemini-3.5-flash-lite` | the model that writes the Linkup query |
 | `GEMINI_API_VERSION` | `v1` | Gemini API version |
-| `CONFIDENCE_THRESHOLD` | `0.7` | under it, `review_status` is `needs_review` |
 | `HOST`, `PORT` | `127.0.0.1`, `8050` | where the service listens |
 
 ## Run
@@ -94,7 +93,6 @@ about 10 seconds to a minute.
 | `channel` | the TV channel |
 | `asserted_at` | when it was said, ISO 8601 |
 | `order` | `linkup_first` or `google_first`, else `CHECK_ORDER` |
-| `id` | your id for the claim, used in the logs |
 
 ```sh
 curl -s http://127.0.0.1:8050/check -H 'Content-Type: application/json' -d '{
@@ -112,17 +110,11 @@ The answer:
 |---|---|
 | `verdict` | `vrai`, `plutot_vrai`, `mixte`, `plutot_faux`, `faux` or `insuffisant` |
 | `explanation` | 2 to 4 sentences, on the facts only |
-| `confidence` | 0 to 1 |
+| `confidence` | 0 to 1, as the model gave it |
 | `meant` | the sense of the claim that was judged |
-| `own`, `faithful`, `scope_ok`, `basis`, `evidence` | the checker's flags (see above) |
-| `guard` | why the verdict was forced to `insuffisant`, else `null` |
-| `calibration` | how the verdict was lowered, else `null` |
-| `review_status` | `needs_review` for `insuffisant` or a confidence under the threshold, else `pending` |
+| `guard` | why the verdict was forced to `insuffisant` (a flag, or what the evidence allows), else `null` |
 | `sources` | `[{title, url, domain, tier, says}]`, best first; `says` is what the page establishes |
-| `check_order`, `linkup_query`, `linkup_from_date`, `linkup_searches` | how the sources were looked for |
-| `model`, `input_tokens`, `output_tokens`, `search_queries` | the model and what it used |
 | `attempts` | each Gemini check call, the replaced ones included: `{call, thinking, verdict, confidence, usable_sources}`, or `{call, thinking, failed}` |
-| `timings`, `latency_ms` | seconds per step, and in all |
 
 An error answers HTTP 500 with `{"error": "..."}` (400 when `claim` is missing).
 
