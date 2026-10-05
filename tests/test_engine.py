@@ -328,9 +328,15 @@ def test_the_prompt_carries_the_speaker_the_quote_the_sentence_the_sense_and_wha
     prompt = g.calls[0]["prompt"]
     assert "Propos exacts de Olivier Faure : « Je n'ai jamais parlé d'alliance avec Jean-Luc Mélenchon »" in prompt
     assert "mais c'est le débat qui s'installe" in prompt and "pas dans ce débat" in prompt and "Je n'en ai pas parlé." in prompt
-    assert "Voix identifiables : Olivier Faure\n" in prompt and "Chaîne : France 2" in prompt and "Heure : 22:00" in prompt
+    assert "Voix identifiables : Olivier Faure\n" in prompt and "Chaîne : France 2\nDate de l'émission : 1 octobre 2026\n" in prompt
     assert "Sous-titres CC : Je n'ai jamais parlé d'alliance" in prompt and "- INSEE (insee.fr) — https://www.insee.fr" in prompt
     assert "{" not in prompt.split("Réponds UNIQUEMENT")[0]
+
+
+def test_the_date_is_the_day_in_paris(run):
+    g = Gemini(reply(FIRST, GROUNDING, queries=1))
+    run(g, linkup_key="", asserted_at="2026-10-01T22:30:00+00:00")                 # 00:30 in Paris: already the 2nd
+    assert "Date de l'émission : 2 octobre 2026\n" in g.calls[0]["prompt"]
 
 
 def test_missing_fields_take_their_defaults(run):

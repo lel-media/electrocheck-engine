@@ -132,6 +132,7 @@ AFTER_CHARS = 800             # what was said right after the claim
 SAYS_CHARS = 400              # what a source says, in the answer
 JSON_ATTEMPTS = 2             # a JSON-only answer with a stray character is asked again: the same prompt almost always comes back clean
 PARIS = ZoneInfo("Europe/Paris")
+MONTHS = ("janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre")
 
 
 # ---------------------------------------------------------------- the few things done more than once
@@ -302,6 +303,7 @@ async def check(claim: dict) -> dict:
     after, captions = claim.get("after") or "", claim.get("captions") or ""
     voices = [str(v).strip() for v in claim.get("voices") or [] if str(v).strip()]
     asserted_at = datetime.fromisoformat(claim["asserted_at"]) if claim.get("asserted_at") else datetime.now(timezone.utc)
+    day = (asserted_at if asserted_at.tzinfo else asserted_at.replace(tzinfo=timezone.utc)).astimezone(PARIS).date()
     order = claim.get("order") if claim.get("order") in ORDERS else CHECK_ORDER if CHECK_ORDER in ORDERS else "google_first"
     if not LINKUP_KEY:
         order = "google_first"                       # no Linkup: Gemini's own search is all there is
@@ -320,7 +322,7 @@ async def check(claim: dict) -> dict:
             ("after", compact(after, AFTER_CHARS) if after.strip() else "—"),
             ("context", compact(claim.get("context") or "", CONTEXT_CHARS)),
             ("channel", claim.get("channel") or "inconnue"),
-            ("when", (asserted_at if asserted_at.tzinfo else asserted_at.replace(tzinfo=timezone.utc)).astimezone(PARIS).strftime("%H:%M"))):
+            ("when", f"{day.day} {MONTHS[day.month - 1]} {day.year}")):         # "aujourd'hui" is judged against this day
         prompt = prompt.replace("{" + name + "}", str(value))
 
     attempts: list[dict] = []          # what each Gemini check call answered, the ones later replaced included

@@ -66,7 +66,7 @@ Voix identifiables : {voices}
 Contexte compact : {context}
 Sous-titres CC : {captions}
 Chaîne : {channel}
-Heure : {when}
+Date de l'émission : {when}
 
 Réponds UNIQUEMENT avec un JSON :
 {
