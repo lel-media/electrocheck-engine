@@ -1,6 +1,6 @@
 # electrocheck-engine
 
-The verdict engine of [Electrocheck](https://lel.media), the live fact-checking of French political television by
+The verdict engine of [Electrocheck](https://lel.media/electrocheck/), the live fact-checking of French political television by
 Les Électrons Libres. It takes a claim made on air and decides whether it is true, on which sources, and how sure it can be.
 
 It is a small HTTP service: one Python file for the code (`engine.py`), one for the prompts (`prompts.py`), and a page to
@@ -55,7 +55,7 @@ Python 3.12 or later.
 Windows (PowerShell):
 
 ```powershell
-py -m venv .venv
+python -m venv .venv
 .venv\Scripts\activate
 pip install -r requirements.txt
 copy .env.example .env      # then edit .env
