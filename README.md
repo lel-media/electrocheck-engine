@@ -36,15 +36,16 @@ live transcription and the extraction, is not in this repository).
 
 Python 3.12 or later.
 
-1. Get a Gemini API key at <https://aistudio.google.com/apikey>. A Linkup key (<https://linkup.so>) is optional:
-   without it, the engine relies on Gemini's own Google Search. Google AI Studio and Linkup both have a limited free tier:
-   you can create the keys and try the engine without paying.
+1. Get a Gemini API key at <https://aistudio.google.com/apikey> (required) and a Linkup key at <https://linkup.so>
+   (recommended). The engine runs without Linkup, on Gemini's own Google Search alone, but Gemini decides by itself whether
+   to search and often answers from memory: many checks then end with no usable source. Google AI Studio and Linkup both
+   have a limited free tier: you can create the keys and try the engine without paying.
 2. Copy `.env.example` to `.env` next to `engine.py` and fill it in:
 
 | Setting | Default | What it does |
 |---|---|---|
 | `API_GEMINI` | (required) | Gemini API key |
-| `API_LINKUP` | empty | Linkup API key; empty = `google_first` only |
+| `API_LINKUP` | empty | Linkup API key, recommended; empty = `google_first` only, with Gemini's own search |
 | `CHECK_ORDER` | `google_first` | `linkup_first` or `google_first` (a request can ask for either) |
 | `GEMINI_MODEL` | `gemini-3.8-flash` | the model that checks |
 | `GEMINI_PREFLIGHT_MODEL` | `gemini-3.5-flash-lite` | the model that writes the Linkup query |
@@ -178,15 +179,17 @@ L'entrée est une affirmation déjà extraite de la transcription, dont on a pro
 
 Python 3.12 ou plus récent.
 
-1. Obtenez une clé d'API Gemini sur <https://aistudio.google.com/apikey>. Une clé Linkup (<https://linkup.so>) est
-   facultative : sans elle, le moteur s'appuie sur la seule recherche Google de Gemini. Google AI Studio et Linkup ont tous
-   deux une offre gratuite limitée : vous pouvez créer les clés et essayer le moteur sans rien payer.
+1. Obtenez une clé d'API Gemini sur <https://aistudio.google.com/apikey> (obligatoire) et une clé Linkup sur
+   <https://linkup.so> (recommandée). Le moteur fonctionne sans Linkup, avec la seule recherche Google de Gemini, mais
+   Gemini décide seul s'il cherche et répond souvent de mémoire : beaucoup de vérifications finissent alors sans source
+   exploitable. Google AI Studio et Linkup ont tous deux une offre gratuite limitée : vous pouvez créer les clés et essayer
+   le moteur sans rien payer.
 2. Copiez `.env.example` en `.env` à côté de `engine.py` et remplissez-le :
 
 | Réglage | Par défaut | Rôle |
 |---|---|---|
 | `API_GEMINI` | (obligatoire) | clé d'API Gemini |
-| `API_LINKUP` | vide | clé d'API Linkup ; vide = `google_first` uniquement |
+| `API_LINKUP` | vide | clé d'API Linkup, recommandée ; vide = `google_first` uniquement, avec la recherche de Gemini seule |
 | `CHECK_ORDER` | `google_first` | `linkup_first` ou `google_first` (une requête peut demander l'un ou l'autre) |
 | `GEMINI_MODEL` | `gemini-3.8-flash` | le modèle qui vérifie |
 | `GEMINI_PREFLIGHT_MODEL` | `gemini-3.5-flash-lite` | le modèle qui écrit la requête Linkup |

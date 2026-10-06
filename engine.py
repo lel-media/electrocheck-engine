@@ -44,7 +44,7 @@ log.setLevel(logging.INFO)                                          # the engine
 # ---------------------------------------------------------------- settings (.env or environment)
 
 GEMINI_KEY = os.environ.get("API_GEMINI", "")
-LINKUP_KEY = os.environ.get("API_LINKUP", "")                       # optional: without it, Gemini's own search only
+LINKUP_KEY = os.environ.get("API_LINKUP", "")                       # recommended: without it, Gemini's own search only
 MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.8-flash")           # the check
 QUERY_MODEL = os.environ.get("GEMINI_PREFLIGHT_MODEL", "gemini-3.5-flash-lite")   # the Linkup query
 API_VERSION = os.environ.get("GEMINI_API_VERSION", "v1")
