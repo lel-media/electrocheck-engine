@@ -37,7 +37,8 @@ live transcription and the extraction, is not in this repository).
 Python 3.12 or later.
 
 1. Get a Gemini API key at <https://aistudio.google.com/apikey>. A Linkup key (<https://linkup.so>) is optional:
-   without it, the engine relies on Gemini's own Google Search.
+   without it, the engine relies on Gemini's own Google Search. Google AI Studio and Linkup both have a limited free tier:
+   you can create the keys and try the engine without paying.
 2. Copy `.env.example` to `.env` next to `engine.py` and fill it in:
 
 | Setting | Default | What it does |
@@ -178,7 +179,8 @@ L'entrée est une affirmation déjà extraite de la transcription, dont on a pro
 Python 3.12 ou plus récent.
 
 1. Obtenez une clé d'API Gemini sur <https://aistudio.google.com/apikey>. Une clé Linkup (<https://linkup.so>) est
-   facultative : sans elle, le moteur s'appuie sur la seule recherche Google de Gemini.
+   facultative : sans elle, le moteur s'appuie sur la seule recherche Google de Gemini. Google AI Studio et Linkup ont tous
+   deux une offre gratuite limitée : vous pouvez créer les clés et essayer le moteur sans rien payer.
 2. Copiez `.env.example` en `.env` à côté de `engine.py` et remplissez-le :
 
 | Réglage | Par défaut | Rôle |
