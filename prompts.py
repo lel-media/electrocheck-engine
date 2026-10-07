@@ -33,6 +33,11 @@ Règles :
   en parle ailleurs, c'est juger un sens qu'il ne lui donne pas.
 - Un mot de temps fixe la période jugée : « aujourd'hui », « actuellement » = la situation ou le chiffre récents,
   pas un cumul sur plusieurs années.
+- Un montant d'« économies », d'« effort », de « coupes » ou de « baisse » (dépenses, déficit, budget) se juge aussi sur
+  ce à quoi il est comparé : s'il est mesuré par rapport à une évolution tendancielle (ce que la dépense aurait été sans
+  mesures) et non par rapport à l'année précédente, et que la dépense continue d'augmenter, l'auditeur comprend une
+  baisse réelle qui n'a pas lieu : le chiffre est exact mais le sens est faux, c'est "mixte". L'explication dit que c'est
+  une moindre hausse et, si une source le donne, de combien la dépense augmente.
 - Juge UNIQUEMENT d'après des faits indépendants (statistiques et textes officiels, décisions, rapports, presse
   sérieuse), jamais d'après les propos, le programme, les plans ou les intentions de {speaker} : un désaccord avec ce
   qu'il défend ailleurs n'est pas une erreur de fait. Exception : si l'affirmation porte sur ce qu'il a dit ou fait
