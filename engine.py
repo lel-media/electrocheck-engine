@@ -20,7 +20,9 @@ from __future__ import annotations
 import json
 import logging
 import os
+import hashlib
 import re
+import time
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import unquote, urlparse
@@ -40,6 +42,7 @@ load_dotenv(HERE / ".env", override=False)
 logging.basicConfig(level=logging.WARNING, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("electrocheck")
 log.setLevel(logging.INFO)                                          # the engine's own steps; the libraries' warnings only
+logging.getLogger("google_genai").setLevel(logging.ERROR)           # its "automatic function calling" notice on every call
 
 # ---------------------------------------------------------------- settings (.env or environment)
 
@@ -49,6 +52,9 @@ MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.8-flash")           # the check
 QUERY_MODEL = os.environ.get("GEMINI_PREFLIGHT_MODEL", "gemini-3.5-flash-lite")   # the Linkup query
 API_VERSION = os.environ.get("GEMINI_API_VERSION", "v1")
 CHECK_ORDER = os.environ.get("CHECK_ORDER", "google_first")         # google_first | linkup_first
+# One JSON line per check in CHECK_LOG/checks-<day>.jsonl: the request, the Linkup query and pages, every Gemini call (the
+# replaced ones too) with its explanation, flags and sources, the decision and its steps. "" = no journal.
+CHECK_LOG = os.environ.get("CHECK_LOG", str(HERE / "logs"))
 HOST = os.environ.get("HOST", "127.0.0.1")
 PORT = int(os.environ.get("PORT", "8050"))
 
@@ -132,6 +138,8 @@ BEFORE_CHARS = 800            # what was said right before the claim: its end is
 AFTER_CHARS = 800             # what was said right after the claim
 SAYS_CHARS = 400              # what a source says, in the answer
 JSON_ATTEMPTS = 2             # a JSON-only answer with a stray character is asked again: the same prompt almost always comes back clean
+LEAN = ("call", "thinking", "verdict", "confidence", "usable_sources", "failed")      # what the answer keeps of each call
+PROMPT_VERSION = hashlib.sha1("".join((prompts.CHECK, prompts.PAGES_FIRST, prompts.LINKUP, prompts.QUERY)).encode()).hexdigest()[:8]
 PARIS = ZoneInfo("Europe/Paris")
 MONTHS = ("janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre")
 
@@ -265,6 +273,14 @@ def merge_sources(written: list, grounding: list[dict]) -> list[dict]:
     return sorted(preferred + [s for s in merged if s not in preferred], key=lambda s: s["tier"] or 3)
 
 
+def describe(call: str, thinking: str | None, seconds: float, searched: bool, payload: dict, sources: list[dict]) -> dict:
+    """What one Gemini check call answered, for the journal (the answer keeps only LEAN of it)."""
+    return {"call": call, "thinking": thinking, "seconds": seconds, "searched": searched,
+            **{k: payload.get(k) for k in ("verdict", "confidence", "explanation", "meant", "own", "faithful", "scope_ok", "basis", "evidence")},
+            "sources": [{"url": src["url"], "tier": src["tier"], "says": src["says"]} for src in sources],
+            "usable_sources": sum(usable(src["url"]) for src in sources)}
+
+
 def flag(value) -> bool | None:
     """A true/false flag as the model writes it; None when absent or unreadable, which is never a yes."""
     if isinstance(value, bool):
@@ -294,211 +310,245 @@ async def page() -> FileResponse:
 @app.post("/check")
 async def check(claim: dict) -> dict:
     """One claim -> its verdict. Fields (only "claim" is required):
-    claim (the sentence to check), speaker, quote (their exact words), sentence (the whole sentence around them), meant (the
-    sense they give their words, when not the literal one), before / after (what was said right before / after: context
-    only), context (the raw transcript around), captions (the TV captions of the passage), voices (the names the
-    transcript can attribute), channel, asserted_at (ISO 8601), order (google_first | linkup_first, else CHECK_ORDER)."""
+    id (yours, to find the check again in the journal), claim (the sentence to check), speaker, quote (their exact words),
+    sentence (the whole sentence around them), meant (the sense they give their words, when not the literal one), before /
+    after (what was said right before / after: context only), context (the raw transcript around), captions (the TV
+    captions of the passage), voices (the names the transcript can attribute), channel, asserted_at (ISO 8601), order
+    (google_first | linkup_first, else CHECK_ORDER)."""
     if client is None:
         raise RuntimeError("Clé Gemini absente : renseigner API_GEMINI dans .env")
     if not str(claim.get("claim") or "").strip():
         return JSONResponse({"error": "claim manquant"}, status_code=400)
-    text = str(claim["claim"])
-    said = text[:60]                                     # names the claim in the log
-    speaker, quote, meant = claim.get("speaker") or "", claim.get("quote") or "", claim.get("meant") or ""
-    before, after, captions = claim.get("before") or "", claim.get("after") or "", claim.get("captions") or ""
-    voices = [str(v).strip() for v in claim.get("voices") or [] if str(v).strip()]
-    asserted_at = datetime.fromisoformat(claim["asserted_at"]) if claim.get("asserted_at") else datetime.now(timezone.utc)
-    day = (asserted_at if asserted_at.tzinfo else asserted_at.replace(tzinfo=timezone.utc)).astimezone(PARIS).date()
-    order = claim.get("order") if claim.get("order") in ORDERS else CHECK_ORDER if CHECK_ORDER in ORDERS else "google_first"
-    if not LINKUP_KEY:
-        order = "google_first"                       # no Linkup: Gemini's own search is all there is
-
-    # the check prompt, filled field by field in this order
-    prompt = prompts.CHECK
-    for name, value in (
-            ("captions", compact(captions, CAPTION_CHARS) if captions.strip() else "—"),
-            ("voices", ", ".join(voices) or "Liste des voix identifiables non disponible."),
-            ("source_list", SOURCE_LIST),
-            ("speaker", speaker or "l'orateur"),
-            ("quote", quote or "—"),
-            ("sentence", claim.get("sentence") or quote or "—"),
-            ("claim", text),
-            ("meant", meant or "(pas d'autre sens que le sens littéral)"),
-            ("after", compact(after, AFTER_CHARS) if after.strip() else "—"),
-            ("before", compact(before, BEFORE_CHARS, keep_end=True) if before.strip() else "—"),
-            ("context", compact(claim.get("context") or "", CONTEXT_CHARS)),
-            ("channel", claim.get("channel") or "inconnue"),
-            ("when", f"{day.day} {MONTHS[day.month - 1]} {day.year}")):         # "aujourd'hui" is judged against this day
-        prompt = prompt.replace("{" + name + "}", str(value))
-
+    started = time.perf_counter()
+    cid = str(claim.get("id") or "")
     attempts: list[dict] = []          # what each Gemini check call answered, the ones later replaced included
-
-    async def find_pages() -> tuple[list[dict], str]:
-        """Linkup's pages for this claim, best tier first, and their numbered list for the prompt."""
-        # the query: an instruction written by the small model; the claim itself when it cannot be written
-        query, from_date, written_by = text, None, "claim"
-        try:
-            answer = await gemini(prompts.QUERY.format(speaker=speaker or "l'orateur", when=asserted_at.date().isoformat(),
-                                                       claim=text, meant=meant or "(le sens littéral)", quote=quote or "—"),
-                                  QUERY_MODEL)
-        except Exception as exc:                                      # a better query is a bonus, never a failure
-            log.warning("Linkup query not written (%r): searching with the claim itself", exc)
-            answer = None
-        payload = answer["payload"] if answer and isinstance(answer["payload"], dict) else {}
-        written = " ".join(str(payload.get("query") or "").split())[:QUERY_CHARS]
-        if len(written) >= 20:
-            query, written_by = written, "llm"
-            # from_date: a real day before the claim, at most ten years back (the claim is about the present)
-            day = str(payload.get("from_date") or "").strip()
-            if isinstance(payload.get("from_date"), str) and re.fullmatch(r"\d{4}-\d{2}-\d{2}", day):
-                try:
-                    since = date.fromisoformat(day)
-                except ValueError:
-                    since = None
-                if since and asserted_at.date() - timedelta(days=3650) <= since < asserted_at.date():
-                    from_date = since.isoformat()
-        body = {"q": query, "depth": "standard", "outputType": "searchResults", "maxResults": LINKUP_RESULTS,
-                "excludeDomains": LINKUP_EXCLUDE}
-        if from_date:
-            body["fromDate"] = from_date
-        try:
-            async with httpx.AsyncClient(timeout=20) as http:
-                r = await http.post(LINKUP_URL, headers={"Authorization": f"Bearer {LINKUP_KEY}"}, json=body)
-                r.raise_for_status()
-                results = r.json().get("results") or []
-        except (httpx.HTTPError, ValueError) as exc:                  # a failed search is just no extra evidence
-            log.warning("Linkup search failed: %r", exc)
-            results = []
-        pages = [{"title": str(item.get("name") or item.get("url") or "").strip(), "url": str(item.get("url") or ""),
-                  "content": " ".join(str(item.get("content") or "").split())[:SNIPPET_CHARS]}
-                 for item in results
-                 if item.get("type", "text") == "text" and urlparse(str(item.get("url") or "")).scheme in ("http", "https")]
-        pages = sorted(pages, key=lambda p: tier(p["url"]))[:LINKUP_PAGES]
-        log.info("%s: Linkup found %d pages (query by %s)", said, len(pages), written_by)
-        listing = "\n".join(f"{i}. [{TIER_LABELS[tier(p['url'])]}] {p['title']}\n   {p['url']}\n   {p['content']}"
-                            for i, p in enumerate(pages, 1))
-        return pages, listing
-
-    async def attempt(label: str, full_prompt: str, thinking: str | None, pages: list[dict]) -> tuple[dict, list[dict]] | None:
-        """One Gemini call with Google Search (and URL reading when there are pages): (answer, sources), None if it failed.
-        The sources: the listed pages it cites (by number, or by URL however spelled; never a page we were not given),
-        then, only if it really searched, the URLs it found itself, then its grounding links."""
-        try:
-            result = await gemini(full_prompt, MODEL, search=True, url_context=bool(pages), thinking=thinking)
-        except Exception as exc:
-            log.exception("%s: the check failed (%s, thinking %s)", said, label, thinking)
-            attempts.append({"call": label, "thinking": thinking, "failed": str(exc)[:200]})
-            return None
-        payload = result["payload"]
-        if not isinstance(payload, dict):
-            attempts.append({"call": label, "thinking": thinking, "failed": "pas un objet JSON"})
-            return None
-        listed, cited = {same_page(p["url"]): p for p in pages}, []
-        for s in payload.get("sources") or []:
-            if not isinstance(s, dict):
-                continue
-            n = s.get("page")
-            page = (pages[n - 1] if isinstance(n, int) and not isinstance(n, bool) and 1 <= n <= len(pages)
-                    else listed.get(same_page(str(s.get("url") or ""))))
-            if page and page["url"] not in {c["url"] for c in cited}:
-                cited.append({"title": page["title"], "url": page["url"], "says": s.get("says") or ""})
-        have = {same_page(c["url"]) for c in cited}
-        written = [w for w in payload.get("sources") or []
-                   if isinstance(w, dict) and same_page(str(w.get("url") or "")) not in have] if result["searched"] else []
-        merged = merge_sources(cited + written, result["grounding"])
-        attempts.append({"call": label, "thinking": thinking, "verdict": payload.get("verdict"), "confidence": payload.get("confidence"),
-                         "usable_sources": sum(usable(s["url"]) for s in merged)})
-        return payload, merged
-
-    payload, sources = None, []
-    if order == "linkup_first":
-        pages, listing = await find_pages()
-        full_prompt = prompt + prompts.PAGES_FIRST.format(pages=listing) if pages else prompt
-        for n, thinking in enumerate((None, "high"), 1):
-            answer = await attempt(f"gemini_{n}", full_prompt, thinking, pages)
-            if answer:
-                payload, sources = answer
-                if any(usable(s["url"]) for s in sources):
-                    break
-                log.info("%s: no usable source (linkup_first, thinking %s)", said, thinking)
-    else:
-        # 1) Gemini + Google Search. Without a real search, the URLs it writes are from memory: not sources.
-        result = await gemini(prompt, MODEL, search=True)
-        payload = result["payload"]
-        if not isinstance(payload, dict):
-            raise RuntimeError("Le fact-check n'a pas renvoyé un objet JSON")
-        sources = merge_sources(payload.get("sources") or [] if result["searched"] else [], result["grounding"])
-        attempts.append({"call": "gemini_1", "thinking": None, "verdict": payload.get("verdict"), "confidence": payload.get("confidence"),
-                         "usable_sources": sum(usable(s["url"]) for s in sources)})
-        # 2) no usable link: Linkup's pages, then Gemini again with its first answer and those pages, then once more thinking
-        #    harder; with no pages at all, once more thinking harder on the plain prompt.
-        if LINKUP_KEY and not any(usable(s["url"]) for s in sources):
-            pages, listing = await find_pages()
-            previous = {k: payload.get(k) for k in ("verdict", "explanation", "confidence")}
-            informed = prompt + prompts.LINKUP.format(previous=json.dumps(previous, ensure_ascii=False), pages=listing)
-            for n, (full_prompt, thinking) in enumerate([(informed, None), (informed, "high")] if pages else [(prompt, "high")], 2):
-                answer = await attempt(f"gemini_{n}", full_prompt, thinking, pages)
-                if not answer:
-                    continue
-                payload, sources = answer
-                if any(usable(s["url"]) for s in sources):
-                    break
-                log.info("%s: no usable source after the Linkup attempt (thinking %s)", said, thinking)
-    if payload is None:
-        raise RuntimeError("Le fact-check n'a pas abouti (aucune réponse exploitable)")
-
-    # 3) still nothing usable: no source at all, never a homepage, never an invented link
-    sources = [s for s in sources if usable(s["url"])]
-
-    raw = str(payload.get("verdict") or "insuffisant").strip().lower().replace("-", "_").replace(" ", "_")
-    verdict = raw if raw in VERDICTS else VERDICT_ALIASES.get(raw.replace("_", " "), VERDICT_ALIASES.get(raw, "insuffisant"))
-    confidence = payload.get("confidence")
-    if isinstance(confidence, str):
-        confidence = confidence.replace("%", "").replace(",", ".").strip()
+    # the journal line of this check: the request as received (replayable with curl), then everything that decided the answer
+    record = {"at": datetime.now(timezone.utc).isoformat(timespec="seconds"), "id": cid, "prompts": PROMPT_VERSION, "model": MODEL,
+              "request": claim, "order": None, "linkup": None, "attempts": attempts, "decision": None, "error": None}
     try:
-        confidence = float(confidence) if confidence not in (None, "") else 0.0
-    except (TypeError, ValueError):
-        confidence = 0.0
-    confidence = max(0.0, min(1.0, confidence / 100 if confidence > 1 else confidence))
-    own, faithful, scope_ok = (flag(payload.get(k)) for k in ("own", "faithful", "scope_ok"))
-    basis = str(payload.get("basis") or "").strip().lower() or None
-    evidence = str(payload.get("evidence") or "").strip().lower() or None
+        text = str(claim["claim"])
+        said = f"{cid} {text[:50]}".strip()                     # names the claim in the log
+        speaker, quote, meant = claim.get("speaker") or "", claim.get("quote") or "", claim.get("meant") or ""
+        before, after, captions = claim.get("before") or "", claim.get("after") or "", claim.get("captions") or ""
+        voices = [str(v).strip() for v in claim.get("voices") or [] if str(v).strip()]
+        asserted_at = datetime.fromisoformat(claim["asserted_at"]) if claim.get("asserted_at") else datetime.now(timezone.utc)
+        day = (asserted_at if asserted_at.tzinfo else asserted_at.replace(tzinfo=timezone.utc)).astimezone(PARIS).date()
+        order = claim.get("order") if claim.get("order") in ORDERS else CHECK_ORDER if CHECK_ORDER in ORDERS else "google_first"
+        if not LINKUP_KEY:
+            order = "google_first"                       # no Linkup: Gemini's own search is all there is
+        record["order"] = order
 
-    # the checker's own flags can only lower a verdict, and a missing flag is not a yes ("insuffisant" needs none)
-    guard = None
-    if verdict != "insuffisant":
-        if own is not True:
-            guard = "not_own_assertion" if own is False else "own_missing"
-        elif faithful is not True:
-            guard = "not_faithful" if faithful is False else "faithful_missing"
-        elif scope_ok is not True:
-            guard = "scope_not_meant" if scope_ok is False else "scope_missing"
-        elif basis != "external_facts":
-            guard = f"basis:{basis or 'missing'}"
-    if guard:
-        log.info("%s: verdict %s forced to insuffisant (%s)", said, verdict, guard)
-        verdict = "insuffisant"
-    elif verdict != "insuffisant":
-        # what the verdict rests on decides how far it can go: not finding is not refuting, an inference is one notch lower
-        asked = verdict
-        if evidence == "absence":
-            verdict, guard = "insuffisant", "evidence:absence"
-        elif verdict in NEGATIVE and evidence not in ("direct", "inference"):
-            verdict, guard = "insuffisant", f"evidence:{evidence or 'missing'}"
-        elif verdict == "faux" and evidence == "inference":
-            verdict = "plutot_faux"
-        if verdict != asked:
-            log.info("%s: verdict %s -> %s (%s)", said, asked, verdict, guard or "evidence: inference")
+        # the check prompt, filled field by field in this order
+        prompt = prompts.CHECK
+        for name, value in (
+                ("captions", compact(captions, CAPTION_CHARS) if captions.strip() else "—"),
+                ("voices", ", ".join(voices) or "Liste des voix identifiables non disponible."),
+                ("source_list", SOURCE_LIST),
+                ("speaker", speaker or "l'orateur"),
+                ("quote", quote or "—"),
+                ("sentence", claim.get("sentence") or quote or "—"),
+                ("claim", text),
+                ("meant", meant or "(pas d'autre sens que le sens littéral)"),
+                ("after", compact(after, AFTER_CHARS) if after.strip() else "—"),
+                ("before", compact(before, BEFORE_CHARS, keep_end=True) if before.strip() else "—"),
+                ("context", compact(claim.get("context") or "", CONTEXT_CHARS)),
+                ("channel", claim.get("channel") or "inconnue"),
+                ("when", f"{day.day} {MONTHS[day.month - 1]} {day.year}")):         # "aujourd'hui" is judged against this day
+            prompt = prompt.replace("{" + name + "}", str(value))
 
-    return {
-        "verdict": verdict,
-        "explanation": str(payload.get("explanation") or "").strip(),
-        "confidence": confidence,
-        "meant": str(payload.get("meant") or meant or "").strip(),
-        "guard": guard,
-        "sources": sources,
-        "attempts": attempts,
-    }
+        async def find_pages() -> tuple[list[dict], str]:
+            """Linkup's pages for this claim, best tier first, and their numbered list for the prompt."""
+            # the query: an instruction written by the small model; the claim itself when it cannot be written
+            query, from_date, written_by, query_error, linkup_error = text, None, "claim", None, None
+            began = time.perf_counter()
+            try:
+                answer = await gemini(prompts.QUERY.format(speaker=speaker or "l'orateur", when=asserted_at.date().isoformat(),
+                                                           claim=text, meant=meant or "(le sens littéral)", quote=quote or "—"),
+                                      QUERY_MODEL)
+            except Exception as exc:                                      # a better query is a bonus, never a failure
+                log.warning("Linkup query not written (%r): searching with the claim itself", exc)
+                query_error, answer = repr(exc)[:200], None
+            payload = answer["payload"] if answer and isinstance(answer["payload"], dict) else {}
+            written = " ".join(str(payload.get("query") or "").split())[:QUERY_CHARS]
+            if len(written) >= 20:
+                query, written_by = written, "llm"
+                # from_date: a real day before the claim, at most ten years back (the claim is about the present)
+                since_day = str(payload.get("from_date") or "").strip()
+                if isinstance(payload.get("from_date"), str) and re.fullmatch(r"\d{4}-\d{2}-\d{2}", since_day):
+                    try:
+                        since = date.fromisoformat(since_day)
+                    except ValueError:
+                        since = None
+                    if since and asserted_at.date() - timedelta(days=3650) <= since < asserted_at.date():
+                        from_date = since.isoformat()
+            query_seconds = round(time.perf_counter() - began, 2)
+            body = {"q": query, "depth": "standard", "outputType": "searchResults", "maxResults": LINKUP_RESULTS,
+                    "excludeDomains": LINKUP_EXCLUDE}
+            if from_date:
+                body["fromDate"] = from_date
+            began = time.perf_counter()
+            try:
+                async with httpx.AsyncClient(timeout=20) as http:
+                    r = await http.post(LINKUP_URL, headers={"Authorization": f"Bearer {LINKUP_KEY}"}, json=body)
+                    r.raise_for_status()
+                    results = r.json().get("results") or []
+            except (httpx.HTTPError, ValueError) as exc:                  # a failed search is just no extra evidence
+                log.warning("Linkup search failed: %r", exc)
+                linkup_error, results = repr(exc)[:200], []
+            pages = [{"title": str(item.get("name") or item.get("url") or "").strip(), "url": str(item.get("url") or ""),
+                      "content": " ".join(str(item.get("content") or "").split())[:SNIPPET_CHARS]}
+                     for item in results
+                     if item.get("type", "text") == "text" and urlparse(str(item.get("url") or "")).scheme in ("http", "https")]
+            pages = sorted(pages, key=lambda p: tier(p["url"]))[:LINKUP_PAGES]
+            log.info("%s: Linkup found %d pages (query by %s)", said, len(pages), written_by)
+            record["linkup"] = {"query": query, "from_date": from_date, "written_by": written_by, "query_error": query_error,
+                                "query_seconds": query_seconds, "seconds": round(time.perf_counter() - began, 2),
+                                "failed": linkup_error, "pages": [{"url": p["url"], "tier": tier(p["url"]), "title": p["title"]} for p in pages]}
+            listing = "\n".join(f"{i}. [{TIER_LABELS[tier(p['url'])]}] {p['title']}\n   {p['url']}\n   {p['content']}"
+                                for i, p in enumerate(pages, 1))
+            return pages, listing
+
+        async def attempt(label: str, full_prompt: str, thinking: str | None, pages: list[dict]) -> tuple[dict, list[dict]] | None:
+            """One Gemini call with Google Search (and URL reading when there are pages): (answer, sources), None if it failed.
+            The sources: the listed pages it cites (by number, or by URL however spelled; never a page we were not given),
+            then, only if it really searched, the URLs it found itself, then its grounding links."""
+            began = time.perf_counter()
+            try:
+                result = await gemini(full_prompt, MODEL, search=True, url_context=bool(pages), thinking=thinking)
+            except Exception as exc:
+                log.exception("%s: the check failed (%s, thinking %s)", said, label, thinking)
+                attempts.append({"call": label, "thinking": thinking, "seconds": round(time.perf_counter() - began, 2),
+                                 "failed": str(exc)[:200]})
+                return None
+            payload = result["payload"]
+            if not isinstance(payload, dict):
+                attempts.append({"call": label, "thinking": thinking, "seconds": round(time.perf_counter() - began, 2),
+                                 "failed": "pas un objet JSON"})
+                return None
+            listed, cited = {same_page(p["url"]): p for p in pages}, []
+            for s in payload.get("sources") or []:
+                if not isinstance(s, dict):
+                    continue
+                n = s.get("page")
+                page = (pages[n - 1] if isinstance(n, int) and not isinstance(n, bool) and 1 <= n <= len(pages)
+                        else listed.get(same_page(str(s.get("url") or ""))))
+                if page and page["url"] not in {c["url"] for c in cited}:
+                    cited.append({"title": page["title"], "url": page["url"], "says": s.get("says") or ""})
+            have = {same_page(c["url"]) for c in cited}
+            written = [w for w in payload.get("sources") or []
+                       if isinstance(w, dict) and same_page(str(w.get("url") or "")) not in have] if result["searched"] else []
+            merged = merge_sources(cited + written, result["grounding"])
+            attempts.append(describe(label, thinking, round(time.perf_counter() - began, 2), result["searched"], payload, merged))
+            return payload, merged
+
+        payload, sources, winner = None, [], None
+        if order == "linkup_first":
+            pages, listing = await find_pages()
+            full_prompt = prompt + prompts.PAGES_FIRST.format(pages=listing) if pages else prompt
+            for n, thinking in enumerate((None, "high"), 1):
+                answer = await attempt(f"gemini_{n}", full_prompt, thinking, pages)
+                if answer:
+                    payload, sources, winner = *answer, f"gemini_{n}"
+                    if any(usable(s["url"]) for s in sources):
+                        break
+                    log.info("%s: no usable source (linkup_first, thinking %s)", said, thinking)
+        else:
+            # 1) Gemini + Google Search. Without a real search, the URLs it writes are from memory: not sources.
+            began = time.perf_counter()
+            result = await gemini(prompt, MODEL, search=True)
+            payload, winner = result["payload"], "gemini_1"
+            if not isinstance(payload, dict):
+                attempts.append({"call": "gemini_1", "thinking": None, "seconds": round(time.perf_counter() - began, 2),
+                                 "failed": "pas un objet JSON"})
+                raise RuntimeError("Le fact-check n'a pas renvoyé un objet JSON")
+            sources = merge_sources(payload.get("sources") or [] if result["searched"] else [], result["grounding"])
+            attempts.append(describe("gemini_1", None, round(time.perf_counter() - began, 2), result["searched"], payload, sources))
+            # 2) no usable link: Linkup's pages, then Gemini again with its first answer and those pages, then once more thinking
+            #    harder; with no pages at all, once more thinking harder on the plain prompt.
+            if LINKUP_KEY and not any(usable(s["url"]) for s in sources):
+                pages, listing = await find_pages()
+                previous = {k: payload.get(k) for k in ("verdict", "explanation", "confidence")}
+                informed = prompt + prompts.LINKUP.format(previous=json.dumps(previous, ensure_ascii=False), pages=listing)
+                for n, (full_prompt, thinking) in enumerate([(informed, None), (informed, "high")] if pages else [(prompt, "high")], 2):
+                    answer = await attempt(f"gemini_{n}", full_prompt, thinking, pages)
+                    if not answer:
+                        continue
+                    payload, sources, winner = *answer, f"gemini_{n}"
+                    if any(usable(s["url"]) for s in sources):
+                        break
+                    log.info("%s: no usable source after the Linkup attempt (thinking %s)", said, thinking)
+        if payload is None:
+            raise RuntimeError("Le fact-check n'a pas abouti (aucune réponse exploitable)")
+
+        # 3) still nothing usable: no source at all, never a homepage, never an invented link
+        sources = [s for s in sources if usable(s["url"])]
+
+        raw = str(payload.get("verdict") or "insuffisant").strip().lower().replace("-", "_").replace(" ", "_")
+        verdict = raw if raw in VERDICTS else VERDICT_ALIASES.get(raw.replace("_", " "), VERDICT_ALIASES.get(raw, "insuffisant"))
+        confidence = payload.get("confidence")
+        if isinstance(confidence, str):
+            confidence = confidence.replace("%", "").replace(",", ".").strip()
+        try:
+            confidence = float(confidence) if confidence not in (None, "") else 0.0
+        except (TypeError, ValueError):
+            confidence = 0.0
+        confidence = max(0.0, min(1.0, confidence / 100 if confidence > 1 else confidence))
+        own, faithful, scope_ok = (flag(payload.get(k)) for k in ("own", "faithful", "scope_ok"))
+        basis = str(payload.get("basis") or "").strip().lower() or None
+        evidence = str(payload.get("evidence") or "").strip().lower() or None
+
+        # the checker's own flags can only lower a verdict, and a missing flag is not a yes ("insuffisant" needs none)
+        asked, guard, calibration = verdict, None, None
+        if verdict != "insuffisant":
+            if own is not True:
+                guard = "not_own_assertion" if own is False else "own_missing"
+            elif faithful is not True:
+                guard = "not_faithful" if faithful is False else "faithful_missing"
+            elif scope_ok is not True:
+                guard = "scope_not_meant" if scope_ok is False else "scope_missing"
+            elif basis != "external_facts":
+                guard = f"basis:{basis or 'missing'}"
+        if guard:
+            log.info("%s: verdict %s forced to insuffisant (%s)", said, verdict, guard)
+            verdict = "insuffisant"
+        elif verdict != "insuffisant":
+            # what the verdict rests on decides how far it can go: not finding is not refuting, an inference is one notch lower
+            if evidence == "absence":
+                verdict, guard = "insuffisant", "evidence:absence"
+            elif verdict in NEGATIVE and evidence not in ("direct", "inference"):
+                verdict, guard = "insuffisant", f"evidence:{evidence or 'missing'}"
+            elif verdict == "faux" and evidence == "inference":
+                verdict, calibration = "plutot_faux", "faux->plutot_faux (evidence: inference)"
+            if verdict != asked:
+                log.info("%s: verdict %s -> %s (%s)", said, asked, verdict, guard or calibration)
+
+        record["decision"] = {"winner": winner, "asked": asked, "verdict": verdict, "confidence": confidence, "guard": guard,
+                              "calibration": calibration, "own": own, "faithful": faithful, "scope_ok": scope_ok, "basis": basis,
+                              "evidence": evidence, "explanation": str(payload.get("explanation") or "").strip(),
+                              "sources": [{"url": s["url"], "tier": s["tier"], "says": s["says"]} for s in sources]}
+        log.info("%s: %s (confidence %.2f), %d source(s), %d call(s), %.1f s", said, verdict, confidence, len(sources), len(attempts),
+                 time.perf_counter() - started)
+        return {
+            "verdict": verdict,
+            "explanation": str(payload.get("explanation") or "").strip(),
+            "confidence": confidence,
+            "meant": str(payload.get("meant") or meant or "").strip(),
+            "guard": guard,
+            "sources": sources,
+            "attempts": [{k: a[k] for k in LEAN if k in a} for a in attempts],
+        }
+    except Exception as exc:
+        record["error"] = f"{type(exc).__name__}: {str(exc)[:300]}"
+        raise
+    finally:
+        if CHECK_LOG:                                  # a full disk or a bad path must never stop a check
+            record["seconds"] = round(time.perf_counter() - started, 2)
+            try:
+                os.makedirs(CHECK_LOG, exist_ok=True)
+                with open(os.path.join(CHECK_LOG, f"checks-{datetime.now(PARIS).date().isoformat()}.jsonl"), "a", encoding="utf-8") as out:
+                    out.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
+            except OSError as exc:
+                log.warning("check journal not written: %r", exc)
 
 
 if __name__ == "__main__":

@@ -60,6 +60,12 @@ def level(config):
     return str(getattr(config.thinking_config.thinking_level, "value", config.thinking_config.thinking_level)).lower() if config.thinking_config else None
 
 
+@pytest.fixture(autouse=True)
+def no_journal(monkeypatch):
+    """The tests write no journal in the repo; the journal tests point it at a temporary folder."""
+    monkeypatch.setattr(engine, "CHECK_LOG", "")
+
+
 @pytest.fixture
 def run(monkeypatch):
     """run(gemini, pages=None, linkup_key="k", **claim) -> (status, answer, Linkup request bodies)."""
@@ -444,3 +450,60 @@ def test_the_page_is_served_and_a_request_without_a_claim_or_a_key_is_refused(mo
     assert web.post("/check", json={"claim": " "}).json() == {"error": "claim manquant"}
     monkeypatch.setattr(engine, "client", None)
     assert web.post("/check", json=CLAIM).json() == {"error": "Clé Gemini absente : renseigner API_GEMINI dans .env"}
+
+
+# ---------------------------------------------------------------- the journal: one line per check, to analyse the decisions
+
+def journal(folder):
+    rows = [json.loads(line) for f in sorted(folder.glob("checks-*.jsonl")) for line in f.read_text(encoding="utf-8").splitlines()]
+    return rows
+
+
+def test_a_check_leaves_one_journal_line_with_everything_that_decided_it(run, monkeypatch, tmp_path):
+    monkeypatch.setattr(engine, "CHECK_LOG", str(tmp_path / "logs"))
+    cited = informed([{"page": 1, "says": "dit ceci"}])
+    g = Gemini(reply(FIRST), reply({**cited, "evidence": "inference", "verdict": "faux", "explanation": "lu sur les pages"}),
+               query=QUERY)
+    _, answer, _ = run(g, pages=PAGES, check_order="linkup_first", id="card0001", before="[Animateur] Et le chômage ?", **FAURE)
+    (row,) = journal(tmp_path / "logs")
+    assert row["id"] == "card0001" and row["request"]["claim"] == FAURE["claim"] and row["request"]["before"] == "[Animateur] Et le chômage ?"
+    assert row["order"] == "linkup_first" and row["model"] == engine.MODEL and len(row["prompts"]) == 8 and row["error"] is None
+    assert row["linkup"]["query"] == QUERY["query"] and row["linkup"]["from_date"] == "2025-10-01" and row["linkup"]["written_by"] == "llm"
+    assert [p["url"] for p in row["linkup"]["pages"]] == [p["url"] for p in PAGES] and row["linkup"]["failed"] is None
+    first, second = row["attempts"]                                   # the replaced answer is kept, with its reasoning
+    assert (first["call"], first["thinking"], first["verdict"], first["explanation"], first["usable_sources"]) == ("gemini_1", None, "faux", "de mémoire", 0)
+    assert (second["call"], second["thinking"], second["usable_sources"], second["evidence"], second["own"], second["basis"]) == (
+        "gemini_2", "high", 1, "inference", True, "external_facts")
+    assert second["sources"][0]["says"] == "dit ceci" and second["searched"] is False and first["seconds"] >= 0
+    d = row["decision"]
+    assert (d["winner"], d["asked"], d["verdict"], d["calibration"], d["evidence"]) == (
+        "gemini_2", "faux", "plutot_faux", "faux->plutot_faux (evidence: inference)", "inference")      # what the code made of it
+    assert d["sources"][0]["url"] == "https://www.franceinfo.fr/a-1.html" and row["seconds"] >= 0
+    assert answer["verdict"] == "plutot_faux" and "evidence" not in answer and "seconds" not in answer      # the answer stays lean
+    assert answer["attempts"][0] == {"call": "gemini_1", "thinking": None, "verdict": "faux", "confidence": 0.6, "usable_sources": 0}
+
+
+def test_a_failed_check_is_journaled_with_its_error(run, monkeypatch, tmp_path):
+    monkeypatch.setattr(engine, "CHECK_LOG", str(tmp_path))
+    status, answer, _ = run(Gemini(RuntimeError("quota"), RuntimeError("quota")), pages=PAGES, check_order="linkup_first", id="boom", **FAURE)
+    (row,) = journal(tmp_path)
+    assert status == 500 and row["id"] == "boom" and row["error"].startswith("RuntimeError: Le fact-check n'a pas abouti")
+    assert [a["failed"] for a in row["attempts"]] == ["quota", "quota"] and row["decision"] is None
+
+
+def test_a_claim_with_a_flag_that_blocks_it_is_journaled_with_the_flags(run, monkeypatch, tmp_path):
+    monkeypatch.setattr(engine, "CHECK_LOG", str(tmp_path))
+    run(Gemini(reply({**FIRST, "own": False}, GROUNDING, queries=1)), linkup_key="")
+    (row,) = journal(tmp_path)
+    assert row["decision"]["guard"] == "not_own_assertion" and row["decision"]["own"] is False and row["decision"]["verdict"] == "insuffisant"
+    assert row["decision"]["asked"] == "faux" and row["attempts"][0]["searched"] is True and row["linkup"] is None
+
+
+def test_no_journal_when_it_is_switched_off_and_a_broken_one_never_stops_a_check(run, monkeypatch, tmp_path):
+    run(Gemini(reply(FIRST, GROUNDING, queries=1)), linkup_key="")                       # CHECK_LOG = "": nothing written
+    assert not list(tmp_path.iterdir())
+    blocked = tmp_path / "not-a-folder"
+    blocked.write_text("x", encoding="utf-8")
+    monkeypatch.setattr(engine, "CHECK_LOG", str(blocked / "logs"))                      # cannot be created
+    status, answer, _ = run(Gemini(reply(FIRST, GROUNDING, queries=1)), linkup_key="")
+    assert status == 200 and answer["verdict"] == "faux"

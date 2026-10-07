@@ -50,6 +50,7 @@ Python 3.12 or later.
 | `GEMINI_MODEL` | `gemini-3.8-flash` | the model that checks |
 | `GEMINI_PREFLIGHT_MODEL` | `gemini-3.5-flash-lite` | the model that writes the Linkup query |
 | `GEMINI_API_VERSION` | `v1` | Gemini API version |
+| `CHECK_LOG` | `logs` | folder of the journal of the checks (see below); empty = none |
 | `HOST`, `PORT` | `127.0.0.1`, `8050` | where the service listens |
 
 ## Run
@@ -120,6 +121,23 @@ The answer:
 | `attempts` | each Gemini check call, the replaced ones included: `{call, thinking, verdict, confidence, usable_sources}`, or `{call, thinking, failed}` |
 
 An error answers HTTP 500 with `{"error": "..."}` (400 when `claim` is missing).
+
+## The journal: why a verdict came out
+
+The answer is kept lean; the reasoning is in the journal. Each check appends one JSON line to
+`logs/checks-YYYY-MM-DD.jsonl` (set `CHECK_LOG` to move it, or to empty to switch it off):
+
+| Key | What it holds |
+|---|---|
+| `request` | the request as received: replay it with `curl` |
+| `id`, `at`, `seconds`, `order`, `model`, `prompts` | your id, when, how long, which order, which model, a short hash of the prompts in use |
+| `linkup` | the query written for Linkup and its date filter, how long it took, an error if any, the pages found (url, tier) |
+| `attempts` | every Gemini check call, the replaced ones included: thinking level, seconds, whether it really searched, its verdict, confidence, explanation, flags (`own`, `faithful`, `scope_ok`, `basis`, `evidence`) and the sources it gave, or why it failed |
+| `decision` | which call won, the verdict asked and the verdict returned, `guard` and `calibration`, the flags and the sources kept |
+| `error` | what went wrong, when the check failed |
+
+A line is about 5 KB. A write that fails never stops a check. To keep the folder small, delete the old files
+(`find logs -mtime +30 -delete`).
 
 ## Tests
 
@@ -194,6 +212,7 @@ Python 3.12 ou plus récent.
 | `GEMINI_MODEL` | `gemini-3.8-flash` | le modèle qui vérifie |
 | `GEMINI_PREFLIGHT_MODEL` | `gemini-3.5-flash-lite` | le modèle qui écrit la requête Linkup |
 | `GEMINI_API_VERSION` | `v1` | version de l'API Gemini |
+| `CHECK_LOG` | `logs` | dossier du journal des vérifications (voir plus bas) ; vide = aucun |
 | `HOST`, `PORT` | `127.0.0.1`, `8050` | où le service écoute |
 
 ### Lancement
@@ -264,6 +283,23 @@ La réponse :
 | `attempts` | chaque appel de vérification à Gemini, y compris ceux qui ont été remplacés : `{call, thinking, verdict, confidence, usable_sources}`, ou `{call, thinking, failed}` |
 
 Une erreur renvoie HTTP 500 avec `{"error": "..."}` (400 quand `claim` manque).
+
+### Le journal : pourquoi un verdict est sorti ainsi
+
+La réponse reste légère ; le raisonnement est dans le journal. Chaque vérification ajoute une ligne JSON à
+`logs/checks-AAAA-MM-JJ.jsonl` (`CHECK_LOG` le déplace, ou le désactive s'il est vide) :
+
+| Clé | Contenu |
+|---|---|
+| `request` | la requête telle que reçue : rejouable avec `curl` |
+| `id`, `at`, `seconds`, `order`, `model`, `prompts` | votre identifiant, quand, combien de temps, quel ordre, quel modèle, une empreinte courte des prompts utilisés |
+| `linkup` | la requête écrite pour Linkup et son filtre de date, sa durée, une erreur éventuelle, les pages trouvées (url, rang) |
+| `attempts` | chaque appel de vérification à Gemini, y compris ceux qui ont été remplacés : niveau de réflexion, durée, a-t-il vraiment cherché, son verdict, sa confiance, son explication, ses indicateurs (`own`, `faithful`, `scope_ok`, `basis`, `evidence`) et les sources données, ou pourquoi il a échoué |
+| `decision` | quel appel l'a emporté, le verdict demandé et le verdict rendu, `guard` et `calibration`, les indicateurs et les sources retenues |
+| `error` | ce qui a échoué, si la vérification a échoué |
+
+Une ligne fait environ 5 Ko. Une écriture qui échoue n'arrête jamais une vérification. Pour garder un dossier léger,
+supprimez les anciens fichiers (`find logs -mtime +30 -delete`).
 
 ### Tests
 
