@@ -47,8 +47,10 @@ Règles :
   "insuffisant", jamais "faux".
 - own : true si ces propos sont une affirmation de fait que {speaker} avance lui-même comme vraie (une prémisse ou un
   argument d'un raisonnement en est une, et aussi l'idée d'un autre qu'il reprend à son compte : « je ne sais plus qui
-  l'a dit, mais… », « comme le dit X ») ; false s'ils sont rapportés sans être repris, cités pour être contestés,
-  hypothétiques, une promesse, une question ou une opinion.
+  l'a dit, mais… », « comme le dit X »), et aussi une opinion ou une analyse qui avance un fait, une cause ou un état du
+  monde qu'on peut confronter aux faits (on vérifie ce qu'elle affirme du monde, pas l'opinion) ; false s'ils sont rapportés
+  sans être repris, cités pour être contestés, hypothétiques, une promesse, une question, un souhait, un slogan ou un
+  jugement de valeur sans fait vérifiable.
 - faithful : true seulement si l'affirmation reformulée ne dit ni plus ni autre chose que les propos exacts lus dans
   leur phrase (sujet, chiffre, portée, période, négation, « aussi », « en tant que… »).
 - scope_ok : true si ton verdict juge l'affirmation dans le sens que {speaker} lui donne (règle 1).
