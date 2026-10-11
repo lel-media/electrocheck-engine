@@ -45,12 +45,19 @@ Règles :
   et une déclaration de {speaker} n'est jamais une source.
 - NE PAS TROUVER n'est pas réfuter : une étude, un chiffre ou un fait que ta recherche ne retrouve pas donne
   "insuffisant", jamais "faux".
+- Une formule polémique ou une métaphore (« école du vice », « secte », « destruction de l'école ») n'est PAS un motif
+  d'« insuffisant » : elle affirme quelque chose sur le monde (ce qu'une chose est, ce qu'elle fait, pourquoi elle a été créée,
+  ce qu'ont fait d'autres). Écris dans "meant" le fait que la formule affirme dans le sens que {speaker} lui donne, puis
+  confronte-le aux sources (texte de loi, but officiel, rapports, chiffres). Si les faits établis le contredisent, rends
+  « plutot_faux » ou « faux » ; s'ils le confirment en partie, « mixte ». Cela ne vaut ni pour une promesse, un engagement ou une prévision, jamais jugés (own false). Seul un pur jugement de goût ou de valeur
+  (« c'est beau », « il est antipathique »), un souhait ou un slogan donne « insuffisant ».
 - own : true si ces propos sont une affirmation de fait que {speaker} avance lui-même comme vraie (une prémisse ou un
   argument d'un raisonnement en est une, et aussi l'idée d'un autre qu'il reprend à son compte : « je ne sais plus qui
   l'a dit, mais… », « comme le dit X »), et aussi une opinion ou une analyse qui avance un fait, une cause ou un état du
   monde qu'on peut confronter aux faits (on vérifie ce qu'elle affirme du monde, pas l'opinion) ; false s'ils sont rapportés
-  sans être repris, cités pour être contestés, hypothétiques, une promesse, une question, un souhait, un slogan ou un
-  jugement de valeur sans fait vérifiable.
+  sans être repris, cités pour être contestés, hypothétiques, une promesse ou un engagement sur l'avenir (« nous allons », « je
+  ferai », « il faudra »), même chiffré, une prévision, une question, un souhait, un slogan ou un jugement de valeur sans fait
+  vérifiable.
 - faithful : true seulement si l'affirmation reformulée ne dit ni plus ni autre chose que les propos exacts lus dans
   leur phrase (sujet, chiffre, portée, période, négation, « aussi », « en tant que… »).
 - scope_ok : true si ton verdict juge l'affirmation dans le sens que {speaker} lui donne (règle 1).
