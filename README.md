@@ -23,7 +23,7 @@ live transcription and the extraction, is not in this repository).
    2 major media, 3 the rest. Social networks and video sites are excluded from the search.
 2. **The model's answer.** A verdict (`vrai`, `plutot_vrai`, `mixte`, `plutot_faux`, `faux`, `insuffisant`), an
    explanation whose every fact comes from a cited source, and flags on how it judged (read by the code, not returned):
-   - `own`: the words are the speaker's own assertion, not a quote they rebut, a hypothesis or a promise;
+   - `own`: the words are the speaker's own assertion, not a quote they rebut, a hypothesis, or a promise or forecast with nothing checkable in it;
    - `faithful`: the claim says neither more nor less than the exact words;
    - `scope_ok`: the verdict judges the sense the speaker meant, not a literal reading they did not intend;
    - `basis`: the verdict rests on independent facts, never on the speaker's own programme or statements;

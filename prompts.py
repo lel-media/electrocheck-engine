@@ -49,15 +49,23 @@ Règles :
   d'« insuffisant » : elle affirme quelque chose sur le monde (ce qu'une chose est, ce qu'elle fait, pourquoi elle a été créée,
   ce qu'ont fait d'autres). Écris dans "meant" le fait que la formule affirme dans le sens que {speaker} lui donne, puis
   confronte-le aux sources (texte de loi, but officiel, rapports, chiffres). Si les faits établis le contredisent, rends
-  « plutot_faux » ou « faux » ; s'ils le confirment en partie, « mixte ». Cela ne vaut ni pour une promesse, un engagement ou une prévision, jamais jugés (own false). Seul un pur jugement de goût ou de valeur
+  « plutot_faux » ou « faux » ; s'ils le confirment en partie, « mixte ». Seul un pur jugement de goût ou de valeur
   (« c'est beau », « il est antipathique »), un souhait ou un slogan donne « insuffisant ».
+- Une promesse, un engagement, une prévision ou un besoin (« nous allons », « il faut », « nous avons besoin de N ») ne se juge
+  ni sur l'intention ni sur l'avenir, mais sur ce qu'elle affirme de vérifiable : un état actuel, un chiffre, une cause, un
+  fait passé, une comparaison, une condition présentée comme un fait (« si on paye les femmes comme les hommes, cela finance la
+  retraite à 60 ans » affirme un chiffrage ; « les maires sont prêts à servir du bio gratuit » affirme un état). Écris dans
+  "meant" cette affirmation, confronte-la aux sources : contredite par les faits établis, rends « plutot_faux » ou « faux » ;
+  confirmée, « vrai » ou « plutot_vrai ». Une promesse, un objectif chiffré (« nous économiserons un milliard ») ou une
+  prévision sans aucune affirmation vérifiable est une intention, pas un fait : « insuffisant », own false.
 - own : true si ces propos sont une affirmation de fait que {speaker} avance lui-même comme vraie (une prémisse ou un
   argument d'un raisonnement en est une, et aussi l'idée d'un autre qu'il reprend à son compte : « je ne sais plus qui
   l'a dit, mais… », « comme le dit X »), et aussi une opinion ou une analyse qui avance un fait, une cause ou un état du
   monde qu'on peut confronter aux faits (on vérifie ce qu'elle affirme du monde, pas l'opinion) ; false s'ils sont rapportés
-  sans être repris, cités pour être contestés, hypothétiques, une promesse ou un engagement sur l'avenir (« nous allons », « je
-  ferai », « il faudra »), même chiffré, une prévision, une question, un souhait, un slogan ou un jugement de valeur sans fait
-  vérifiable.
+  sans être repris, cités pour être contestés, hypothétiques, une promesse, un engagement ou une prévision sans aucune
+  affirmation vérifiable (« nous allons », « je ferai », « il faudra », même chiffré), une question, un souhait, un slogan ou un
+  jugement de valeur sans fait vérifiable. Une promesse, un engagement, une prévision ou un besoin qui avance un fait, un
+  chiffre ou une cause vérifiable est own true : on juge cette affirmation, pas l'intention.
 - faithful : true seulement si l'affirmation reformulée ne dit ni plus ni autre chose que les propos exacts lus dans
   leur phrase (sujet, chiffre, portée, période, négation, « aussi », « en tant que… »).
 - scope_ok : true si ton verdict juge l'affirmation dans le sens que {speaker} lui donne (règle 1).
@@ -68,6 +76,10 @@ Règles :
   de ne rien avoir trouvé.
 - "faux" seulement pour une contradiction directe et établie avec les faits (evidence "direct") ; une exagération d'un
   fait en partie vrai, un chiffre approximatif, une nuance ou une omission font "plutot_faux" ou "mixte".
+- Choisis entre eux d'après l'idée principale que l'auditeur retient. "mixte" est réservé au cas où cette idée est elle-même
+  en partie vraie et en partie fausse, ou exacte à la lettre mais trompeuse (règle 1). Si l'idée principale est contredite
+  par les faits, même avec un détail exact ou un bon ordre de grandeur, rends "plutot_faux" ("faux" si la contradiction
+  est directe), pas "mixte".
 - si les sources se contredisent ou manquent : verdict "insuffisant" et confiance basse ;
 - NE MÉLANGE PAS LES SOURCES : chaque fait et chaque chiffre de l'explication vient d'une source de "sources", et le
   "says" de cette source le contient (ce que la page établit, avec ses chiffres, en une phrase) ; n'attribue jamais à une
