@@ -276,7 +276,7 @@ def merge_sources(written: list, grounding: list[dict]) -> list[dict]:
 def describe(call: str, thinking: str | None, seconds: float, searched: bool, payload: dict, sources: list[dict]) -> dict:
     """What one Gemini check call answered, for the journal (the answer keeps only LEAN of it)."""
     return {"call": call, "thinking": thinking, "seconds": seconds, "searched": searched,
-            **{k: payload.get(k) for k in ("verdict", "confidence", "explanation", "meant", "own", "faithful", "scope_ok", "basis", "evidence")},
+            **{k: payload.get(k) for k in ("verdict", "confidence", "summary", "explanation", "meant", "own", "faithful", "scope_ok", "basis", "evidence")},
             "sources": [{"url": src["url"], "tier": src["tier"], "says": src["says"]} for src in sources],
             "usable_sources": sum(usable(src["url"]) for src in sources)}
 
@@ -524,12 +524,19 @@ async def check(claim: dict) -> dict:
 
         record["decision"] = {"winner": winner, "asked": asked, "verdict": verdict, "confidence": confidence, "guard": guard,
                               "calibration": calibration, "own": own, "faithful": faithful, "scope_ok": scope_ok, "basis": basis,
-                              "evidence": evidence, "explanation": str(payload.get("explanation") or "").strip(),
+                              "evidence": evidence, "summary": str(payload.get("summary") or "").strip(),
+                              "explanation": str(payload.get("explanation") or "").strip(),
                               "sources": [{"url": s["url"], "tier": s["tier"], "says": s["says"]} for s in sources]}
         log.info("%s: %s (confidence %.2f), %d source(s), %d call(s), %.1f s", said, verdict, confidence, len(sources), len(attempts),
                  time.perf_counter() - started)
+        # the one sentence for the air; a verdict the guards brought down to "insuffisant" has none: it would state what the
+        # verdict no longer does
+        summary = " ".join(str(payload.get("summary") or "").split())
+        if verdict == "insuffisant" and asked != "insuffisant":
+            summary = ""
         return {
             "verdict": verdict,
+            "summary": summary,
             "explanation": str(payload.get("explanation") or "").strip(),
             "confidence": confidence,
             "meant": str(payload.get("meant") or meant or "").strip(),

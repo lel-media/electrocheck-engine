@@ -100,6 +100,7 @@ Réponds UNIQUEMENT avec un JSON :
 {
   "verdict": "vrai|plutot_vrai|mixte|plutot_faux|faux|insuffisant",
   "explanation": "2 à 4 phrases, contextualisées, sur les faits seulement",
+  "summary": "UNE phrase de 25 mots au plus, celle qu'un présentateur dirait à l'antenne : le fait établi qui confirme ou corrige l'affirmation, sans « selon nos sources » ni nom de l'orateur ; ex. : Aucune étude scientifique n'établit que la consommation d'aliments biologiques permettrait d'économiser des « milliards » sur le diabète.",
   "confidence": 0.0,
   "meant": "le sens de l'affirmation que tu as jugé",
   "own": true,
