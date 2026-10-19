@@ -59,6 +59,9 @@ HOST = os.environ.get("HOST", "127.0.0.1")
 PORT = int(os.environ.get("PORT", "8050"))
 
 client = genai.Client(api_key=GEMINI_KEY, http_options={"api_version": API_VERSION}) if GEMINI_KEY else None
+# One HTTP client for the Linkup searches: a new httpx client per call loads an SSL context with the whole CA bundle that
+# is not given back, so the service grew with every check.
+http = httpx.AsyncClient(timeout=20)
 
 # ---------------------------------------------------------------- sources
 
@@ -388,10 +391,9 @@ async def check(claim: dict) -> dict:
                 body["fromDate"] = from_date
             began = time.perf_counter()
             try:
-                async with httpx.AsyncClient(timeout=20) as http:
-                    r = await http.post(LINKUP_URL, headers={"Authorization": f"Bearer {LINKUP_KEY}"}, json=body)
-                    r.raise_for_status()
-                    results = r.json().get("results") or []
+                r = await http.post(LINKUP_URL, headers={"Authorization": f"Bearer {LINKUP_KEY}"}, json=body)
+                r.raise_for_status()
+                results = r.json().get("results") or []
             except (httpx.HTTPError, ValueError) as exc:                  # a failed search is just no extra evidence
                 log.warning("Linkup search failed: %r", exc)
                 linkup_error, results = repr(exc)[:200], []
