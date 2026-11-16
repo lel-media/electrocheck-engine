@@ -28,18 +28,9 @@ Règles :
   sujet), la phrase entière et ce qui suit, pas dans un
   sens littéral ou technique qu'il ne lui donne pas : une formule (« je n'ai jamais… », « au bord de la faillite »)
   se vérifie pour ce qu'elle veut dire. Si ce sens est exact mais que la lettre est fausse (ou l'inverse), c'est
-  "mixte", sauf un chiffre exact dit dans une formulation approximative (règle suivante). Écris dans "meant" le sens que
-  tu as jugé. Exemple : « Personne ne parle jamais des agriculteurs », dit en
+  "mixte". Écris dans "meant" le sens que tu as jugé. Exemple : « Personne ne parle jamais des agriculteurs », dit en
   plein débat et suivi de « vous, vous n'en parlez pas », veut dire « on n'en parle pas dans ce débat » ; juger qu'on
   en parle ailleurs, c'est juger un sens qu'il ne lui donne pas.
-- Un chiffre cité de mémoire se juge sur la statistique publique à laquelle {speaker} se réfère vraisemblablement.
-  D'après le contexte (le sujet, ce qui précède, la phrase entière), cherche d'abord quelle statistique officielle
-  correspond à son chiffre. Si son chiffre correspond à cette statistique et que seule la formulation est approximative
-  (un mot plus large ou plus fort que celui de la statistique, une population ou une durée arrondies), rends
-  « plutot_vrai » et dis l'imprécision dans l'explication ; « vrai » si la formulation est fidèle. Écris dans "meant"
-  l'affirmation dans ce sens. Ne juge à la lettre que si aucune statistique plausible ne correspond à son chiffre. La
-  statistique de référence doit venir de tes sources, jamais être supposée, et elle doit être celle dont parle le
-  contexte, pas une autre choisie pour lui donner raison.
 - Un mot de temps fixe la période jugée : « aujourd'hui », « actuellement » = la situation ou le chiffre récents,
   pas un cumul sur plusieurs années.
 - Un montant d'« économies », d'« effort », de « coupes » ou de « baisse » (dépenses, déficit, budget) se juge aussi sur
