@@ -62,6 +62,12 @@ def level(config):
 
 
 @pytest.fixture(autouse=True)
+def figure_retry(monkeypatch):
+    """The figure rule's second attempt is off in production (CHECK_FIGURE_RETRY); its tests run it on."""
+    monkeypatch.setattr(engine, "FIGURE_RETRY", True)
+
+
+@pytest.fixture(autouse=True)
 def no_journal(monkeypatch):
     """The tests write no journal in the repo; the journal tests point it at a temporary folder."""
     monkeypatch.setattr(engine, "CHECK_LOG", "")
@@ -613,3 +619,13 @@ def test_asked_again_and_back_without_a_source_the_first_answer_stands(run):
     g = Gemini(reply(negative([DESERTED], summary)), reply(negative([{"title": "x", "url": "https://x.example/"}], summary)))
     _, answer, _ = run(g, pages=PAGES, check_order="linkup_first", **ATTAL)
     assert len(g.calls) == 2 and urls(answer) == ["https://www.franceinfo.fr/a-1.html"] and answer["verdict"] == "mixte"
+
+
+def test_with_the_figure_rule_off_one_attempt_no_notch_but_the_pages_still_read(run, monkeypatch):
+    monkeypatch.setattr(engine, "FIGURE_RETRY", False)
+    pages = [{"type": "text", "name": "Investir", "url": "https://investir.lesechos.fr/a.html",
+              "content": "Les prix ont reculé. La rentabilité brute se stabilise autour de 5,2 % depuis début 2025. Fin."}, PAGES[1]]
+    summary = "La rentabilité reste de 5,2 % et 3,1 milliards ont été investis."
+    g = Gemini(reply(negative([{"page": 1, "says": "Les prix ont reculé."}], summary)))
+    _, answer, _ = run(g, pages=pages, check_order="linkup_first", **ATTAL)
+    assert len(g.calls) == 1 and answer["verdict"] == "plutot_faux" and "5,2 %" in answer["sources"][0]["says"]

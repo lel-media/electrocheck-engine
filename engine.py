@@ -151,6 +151,10 @@ VERDICT_ALIASES = {"true": "vrai", "false": "faux", "mostly true": "plutot_vrai"
                    "plutôt vrai": "plutot_vrai", "plutot vrai": "plutot_vrai", "plutôt faux": "plutot_faux",
                    "plutot faux": "plutot_faux", "à relire": "insuffisant", "indetermine": "insuffisant", "indéterminé": "insuffisant"}
 NEGATIVE = ("faux", "plutot_faux", "mixte")
+# the second attempt and the notch lower for figures no cited page gives: off since 2026-11-16 22:20 (owner, during a
+# live: the median check went from 19 s to 57 s, 73 % asked again, a third lowered). The cited pages are still read and the
+# sentences found join "says"; the reviewer holds a card its sources do not back. CHECK_FIGURE_RETRY=1 turns it back on.
+FIGURE_RETRY = os.environ.get("CHECK_FIGURE_RETRY", "0") == "1"
 NOTCH = {"faux": "plutot_faux", "plutot_faux": "mixte", "vrai": "plutot_vrai", "plutot_vrai": "mixte"}   # one notch less sure
 CAPTION_CHARS = 800           # the captions given to the check
 CONTEXT_CHARS = 800           # the raw transcript around the claim (a whole transcript window: up to about 750)
@@ -600,7 +604,7 @@ async def check(claim: dict) -> dict:
                         if missing:                          # read the pages themselves before asking again
                             missing, unread = await grounded(sources, missing, {pg["url"]: pg.get("full") or "" for pg in pages})
                             unreadable = unread > 0
-                        if not missing:
+                        if not missing or not FIGURE_RETRY:
                             break
                         sourced = (payload, sources, winner)
                         # a verdict on figures no cited page gives: once more, asked to cite them or rethink
@@ -677,7 +681,7 @@ async def check(claim: dict) -> dict:
                 verdict, calibration = "plutot_faux", "faux->plutot_faux (evidence: inference)"
             # still stating figures no cited page gives: one notch less sure (the owner's rule: lower rather than nothing)
             # only when every cited page was read: a figure may be on a page a site would not let us read
-            if verdict in NOTCH and not unreadable and (missing := unsourced_figures({**payload, "verdict": verdict}, sources,
+            if FIGURE_RETRY and verdict in NOTCH and not unreadable and (missing := unsourced_figures({**payload, "verdict": verdict}, sources,
                                                                                      text, quote, meant)):
                 lower = NOTCH[verdict]
                 calibration = f"{verdict}->{lower} (figures no cited source gives: {', '.join(missing)})"
