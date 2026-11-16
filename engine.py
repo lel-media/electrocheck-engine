@@ -276,11 +276,20 @@ async def gemini(prompt: str, model: str, *, search: bool = False, url_context: 
         # a search query, or grounding links without any (they come from a search too)
         queries = [q for q in getattr(meta, "web_search_queries", None) or [] if str(q or "").strip()]
         searched = searched or bool(queries) or bool(getattr(meta, "grounding_chunks", None))
-        for chunk in getattr(meta, "grounding_chunks", None) or []:
+        chunks = getattr(meta, "grounding_chunks", None) or []
+        # what each search page backs: Google ties each passage of the answer to the pages it rests on (grounding
+        # supports); those passages become the page's "says", so a figure the model took from a search page is sourced
+        backs: dict[int, list[str]] = {}
+        for support in getattr(meta, "grounding_supports", None) or []:
+            segment = " ".join(str(getattr(getattr(support, "segment", None), "text", "") or "").split())
+            for i in getattr(support, "grounding_chunk_indices", None) or []:
+                if segment and segment not in backs.setdefault(i, []):
+                    backs[i].append(segment)
+        for i, chunk in enumerate(chunks):
             web = getattr(chunk, "web", None)
             url = str(getattr(web, "uri", "") or "") if web else ""
             if url and url not in {g["url"] for g in grounding}:
-                grounding.append({"title": str(getattr(web, "title", "") or url), "url": url})
+                grounding.append({"title": str(getattr(web, "title", "") or url), "url": url, "says": " ".join(backs.get(i, []))})
     try:
         payload = parse_json(text)
     except ValueError:
@@ -336,7 +345,8 @@ def unsourced_figures(payload: dict, sources: list[dict], *said: str) -> list[st
         return []
     have = set().union(*(figures(s.get("says") or "") for s in sources), *(figures(t) for t in said))
     stated = figures(str(payload.get("summary") or "")) | figures(str(payload.get("explanation") or ""))
-    return sorted(stated - have)
+    # a lone digit ("2 fois", "1 sur 3") is everywhere and proves nothing
+    return sorted(f for f in stated - have if not (f.isdigit() and len(f) == 1))
 
 
 _SENTENCE = re.compile(r"(?<=[.!?;])\s+")
@@ -361,11 +371,31 @@ async def page_texts(sources: list[dict], known: dict[str, str]) -> dict[str, st
     return dict(zip(urls, await asyncio.gather(*(one(u) for u in urls))))
 
 
-async def grounded(sources: list[dict], missing: list[str], known: dict[str, str]) -> tuple[list[str], int]:
+async def linkup_for(sentence: str) -> list[dict]:
+    """Linkup's pages for one sentence of the verdict (1-3 s): where a figure the model stated may be found."""
+    if not LINKUP_KEY:
+        return []
+    try:
+        r = await http.post(LINKUP_URL, headers={"Authorization": f"Bearer {LINKUP_KEY}"}, timeout=10,
+                            json={"q": sentence[:QUERY_CHARS], "depth": "standard", "outputType": "searchResults",
+                                  "maxResults": 8, "excludeDomains": LINKUP_EXCLUDE})
+        r.raise_for_status()
+        return [{"title": str(i.get("name") or i.get("url") or "").strip(), "url": str(i.get("url") or ""),
+                 "full": " ".join(str(i.get("content") or "").split())[:PAGE_TEXT_CHARS]}
+                for i in r.json().get("results") or [] if i.get("type", "text") == "text" and usable(str(i.get("url") or ""))]
+    except (httpx.HTTPError, ValueError) as exc:
+        log.info("Linkup search for a figure failed: %r", exc)
+        return []
+
+
+async def grounded(sources: list[dict], missing: list[str], known: dict[str, str],
+                   listed: list[dict] = (), stated: str = "") -> tuple[list[str], int]:
     """The figures still missing once the cited pages themselves are read: the model often leaves out of a page's "says" a
     figure the page does give. Such a figure's sentence is added to that source's "says" (the post writer may then use
     it); a figure on none of the pages stays missing (2026-11-16: Glucksmann's Insee figures were on no cited page). Also
-    returns how many cited pages could not be read (anti-bot, paywall, PDF: 25 of 80 cited pages that week)."""
+    returns how many cited pages could not be read (anti-bot, paywall, PDF: 25 of 80 cited pages that week).
+    `listed`: the Linkup pages given to the model; a figure on one it read but did not cite makes that page a source
+    (2026-11-16 live: 29 of 108 unsourced figures were on such a page)."""
     texts = await page_texts(sources, known)
     unread = sum(1 for t in texts.values() if not t)
     left = []
@@ -379,7 +409,37 @@ async def grounded(sources: list[dict], missing: list[str], known: dict[str, str
         source = next(s for s in sources if s["url"] == url)
         if sentence[:300] not in (source.get("says") or ""):
             source["says"] = f'{source.get("says") or ""} {sentence[:300]}'.strip()
-    return left, unread
+    still = []
+    for figure in left:
+        hit = next(((page, sentence) for page in listed if page["url"] not in {s["url"] for s in sources}
+                    for sentence in _SENTENCE.split(page.get("full") or "") if figure in figures(sentence)), None)
+        if hit is None:
+            still.append(figure)
+            continue
+        page, sentence = hit
+        sources.append({"title": page["title"], "url": page["url"], "domain": domain(page["url"]),
+                        "tier": tier(page["url"], page["title"]), "says": sentence[:300]})
+    if still and stated:
+        # last: a fast Linkup search on the verdict's own sentences that state them (owner, 2026-11-16: Linkup answers in
+        # 1-3 s, a second Gemini attempt takes 30-40 s); a page that gives the figure becomes a source
+        wanted = [x for x in _SENTENCE.split(stated) if figures(x) & set(still)][:2]
+        found = [page for batch in await asyncio.gather(*(linkup_for(x) for x in wanted)) for page in batch]
+        left = []
+        for figure in still:
+            hit = next(((page, sentence) for page in found for sentence in _SENTENCE.split(page["full"])
+                        if figure in figures(sentence)), None)
+            if hit is None:
+                left.append(figure)
+                continue
+            page, sentence = hit
+            if page["url"] not in {s["url"] for s in sources}:
+                sources.append({"title": page["title"], "url": page["url"], "domain": domain(page["url"]),
+                                "tier": tier(page["url"], page["title"]), "says": sentence[:300]})
+            else:
+                source = next(s for s in sources if s["url"] == page["url"])
+                source["says"] = f'{source.get("says") or ""} {sentence[:300]}'.strip()
+        still = left
+    return still, unread
 
 
 def normal_verdict(raw) -> str:
@@ -602,7 +662,8 @@ async def check(claim: dict) -> dict:
                     if any(usable(s["url"]) for s in sources):
                         missing = unsourced_figures(payload, sources, text, quote, meant)
                         if missing:                          # read the pages themselves before asking again
-                            missing, unread = await grounded(sources, missing, {pg["url"]: pg.get("full") or "" for pg in pages})
+                            missing, unread = await grounded(sources, missing, {pg["url"]: pg.get("full") or "" for pg in pages},
+                                                             pages, f'{payload.get("summary") or ""} {payload.get("explanation") or ""}')
                             unreadable = unread > 0
                         if not missing or not FIGURE_RETRY:
                             break
@@ -689,7 +750,10 @@ async def check(claim: dict) -> dict:
             if verdict != asked:
                 log.info("%s: verdict %s -> %s (%s)", said, asked, verdict, guard or calibration)
 
-        record["decision"] = {"winner": winner, "asked": asked, "verdict": verdict, "confidence": confidence, "guard": guard,
+        # what the verdict still states that no page gives: journaled, and returned for the guards downstream
+        unsourced = [] if verdict == "insuffisant" else unsourced_figures({**payload, "verdict": verdict}, sources, text, quote, meant)
+        record["decision"] = {"unsourced": unsourced, "page_unread": unreadable,
+                              "winner": winner, "asked": asked, "verdict": verdict, "confidence": confidence, "guard": guard,
                               "calibration": calibration, "own": own, "faithful": faithful, "scope_ok": scope_ok, "basis": basis,
                               "evidence": evidence, "summary": str(payload.get("summary") or "").strip(),
                               "explanation": str(payload.get("explanation") or "").strip(),
@@ -708,6 +772,7 @@ async def check(claim: dict) -> dict:
             "confidence": confidence,
             "meant": str(payload.get("meant") or meant or "").strip(),
             "guard": guard,
+            "unsourced": unsourced,
             "sources": sources,
             "attempts": [{k: a[k] for k in LEAN if k in a} for a in attempts],
         }

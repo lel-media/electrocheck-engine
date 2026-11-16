@@ -629,3 +629,37 @@ def test_with_the_figure_rule_off_one_attempt_no_notch_but_the_pages_still_read(
     g = Gemini(reply(negative([{"page": 1, "says": "Les prix ont reculé."}], summary)))
     _, answer, _ = run(g, pages=pages, check_order="linkup_first", **ATTAL)
     assert len(g.calls) == 1 and answer["verdict"] == "plutot_faux" and "5,2 %" in answer["sources"][0]["says"]
+
+
+def test_a_figure_from_the_model_s_google_search_is_sourced_by_its_grounding_support(run):
+    """Google ties each passage of the answer to the search pages behind it: those passages are the pages' "says"."""
+    seg = "Fin 2025, la France comptait 1 017 500 contrats d'apprentissage."
+    meta = SimpleNamespace(web_search_queries=["apprentis 2025"],
+                           grounding_chunks=[SimpleNamespace(web=SimpleNamespace(uri="https://travail-emploi.gouv.fr/apprentis", title="Dares"))],
+                           grounding_supports=[SimpleNamespace(segment=SimpleNamespace(text=seg), grounding_chunk_indices=[0])])
+    payload = {**informed([], "vrai"), "summary": "La France compte 1 017 500 apprentis."}
+    g = Gemini(SimpleNamespace(text=json.dumps(payload), candidates=[SimpleNamespace(grounding_metadata=meta)]))
+    _, answer, _ = run(g, pages=PAGES, check_order="linkup_first", **ATTAL)
+    dares = next(s for s in answer["sources"] if "travail-emploi" in s["url"])
+    assert "1 017 500" in dares["says"] and answer["unsourced"] == []
+
+
+def test_a_figure_on_an_uncited_linkup_page_makes_it_a_source_and_lone_digits_are_ignored(run, monkeypatch):
+    monkeypatch.setattr(engine, "FIGURE_RETRY", False)
+    pages = [PAGES[0], {"type": "text", "name": "Investir", "url": "https://investir.lesechos.fr/b.html",
+                        "content": "La rentabilité brute se stabilise autour de 5,2 % depuis début 2025."}]
+    g = Gemini(reply(negative([{"page": 1, "says": "Les investisseurs ont déserté."}], "Rentabilité de 5,2 %, 2 fois moins qu'avant.")))
+    _, answer, _ = run(g, pages=pages, check_order="linkup_first", **ATTAL)
+    assert "https://investir.lesechos.fr/b.html" in urls(answer) and answer["unsourced"] == []
+
+
+def test_a_figure_still_on_no_page_is_looked_for_with_a_fast_linkup_search(run, monkeypatch):
+    """Owner, 2026-11-16: Linkup answers in 1-3 s, a second Gemini attempt takes 30-40 s."""
+    monkeypatch.setattr(engine, "FIGURE_RETRY", False)
+    found = [{"type": "text", "name": "Dares", "url": "https://dares.travail-emploi.gouv.fr/apprentis",
+              "content": "Fin 2025, 1 017 500 contrats d'apprentissage étaient en cours."}]
+    summary = "La France compte 1 017 500 apprentis fin 2025."
+    g = Gemini(reply(negative([{"page": 1, "says": "Les apprentis sont nombreux."}], summary, "vrai")))
+    _, answer, searched = run(g, pages=PAGES + found if False else PAGES, check_order="linkup_first", **ATTAL)
+    assert answer["unsourced"] == ["1017500"]                          # the stub Linkup gives no page: still unsourced
+    assert any(b["q"].startswith("La France compte 1 017 500") for b in searched)
