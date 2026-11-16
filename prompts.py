@@ -15,7 +15,10 @@ Ordre de préférence des sources : 1) sources primaires (statistiques et textes
 internationaux, recherche publique, Our World in Data) ; 2) grands médias reconnus ; 3) le reste (blogs, sites divers).
 Un rapport parlementaire (commission d'enquête, rapport d'information) est une analyse politique, pas une statistique :
 pour un chiffre, préfère l'Insee, la Cour des comptes, les services statistiques des ministères ou les organismes
-d'évaluation publics, et si un rapport parlementaire donne un autre chiffre, dis lequel fait référence et pourquoi. Les articles de presse peuvent contextualiser, mais ne doivent pas être la source principale si une
+d'évaluation publics (IGF, Haut-Commissariat au Plan, France Stratégie), et si un rapport parlementaire donne un autre
+chiffre, dis lequel fait référence et pourquoi. Un chiffre qui ne vient que d'un rapport parlementaire ne peut jamais
+donner raison à {speaker} contre ces organismes : juge sur leurs chiffres (200 milliards d'aides aux entreprises quand
+l'IGF et le Haut-Commissariat au Plan en comptent 88 à 112 et seule une commission du Sénat 211 : « plutot_faux »). Les articles de presse peuvent contextualiser, mais ne doivent pas être la source principale si une
 source primaire couvre le sujet. Si aucune source de la liste ne convient, élargis ensuite la recherche.
 
 Dit juste avant (contexte seulement, n'en tire aucune autre affirmation) : {before}
