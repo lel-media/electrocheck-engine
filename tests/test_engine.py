@@ -663,3 +663,10 @@ def test_a_figure_still_on_no_page_is_looked_for_with_a_fast_linkup_search(run, 
     _, answer, searched = run(g, pages=PAGES + found if False else PAGES, check_order="linkup_first", **ATTAL)
     assert answer["unsourced"] == ["1017500"]                          # the stub Linkup gives no page: still unsourced
     assert any(b["q"].startswith("La France compte 1 017 500") for b in searched)
+
+
+def test_parliament_reports_are_not_primary_sources():
+    """Owner, 2026-11-16: a Senate inquiry's 211 Md€ of aid to firms is political; the statistical bodies count 108-112 Md€."""
+    assert engine.tier("https://www.senat.fr/rap/r24-808-1/r24-808-120.html") == 3
+    assert engine.tier("https://www.assemblee-nationale.fr/dyn/17/rapports/x") == 3
+    assert engine.tier("https://www.insee.fr/fr/statistiques/1") == 1 and "senat.fr" not in engine.SOURCE_LIST

@@ -11,9 +11,11 @@ française. Utilise la recherche web (Google Search).
 Cherche EN PRIORITÉ sur ces sources primaires / institutionnelles :
 {source_list}
 
-Ordre de préférence des sources : 1) sources primaires (statistiques et textes officiels, institutions, parlements,
-organismes internationaux, recherche publique, Our World in Data) ; 2) grands médias reconnus ; 3) le reste (blogs,
-sites divers). Les articles de presse peuvent contextualiser, mais ne doivent pas être la source principale si une
+Ordre de préférence des sources : 1) sources primaires (statistiques et textes officiels, institutions, organismes
+internationaux, recherche publique, Our World in Data) ; 2) grands médias reconnus ; 3) le reste (blogs, sites divers).
+Un rapport parlementaire (commission d'enquête, rapport d'information) est une analyse politique, pas une statistique :
+pour un chiffre, préfère l'Insee, la Cour des comptes, les services statistiques des ministères ou les organismes
+d'évaluation publics, et si un rapport parlementaire donne un autre chiffre, dis lequel fait référence et pourquoi. Les articles de presse peuvent contextualiser, mais ne doivent pas être la source principale si une
 source primaire couvre le sujet. Si aucune source de la liste ne convient, élargis ensuite la recherche.
 
 Dit juste avant (contexte seulement, n'en tire aucune autre affirmation) : {before}

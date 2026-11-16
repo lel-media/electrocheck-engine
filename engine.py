@@ -85,8 +85,6 @@ CATALOG = (
     ("OCDE", "https://www.oecd.org"),
     ("Eurostat", "https://ec.europa.eu/eurostat"),
     ("data.gouv.fr", "https://www.data.gouv.fr"),
-    ("Assemblée nationale", "https://www.assemblee-nationale.fr"),
-    ("Sénat", "https://www.senat.fr"),
     ("Cour des comptes", "https://www.ccomptes.fr"),
     ("Vie publique", "https://www.vie-publique.fr"),
     ("Légifrance", "https://www.legifrance.gouv.fr"),
@@ -106,8 +104,10 @@ CATALOG = (
 CATALOG_DOMAINS = tuple((urlparse(url).hostname or "").removeprefix("www.") for _, url in CATALOG)
 SOURCE_LIST = "\n".join(f"- {name} ({domain}) — {url}" for (name, url), domain in zip(CATALOG, CATALOG_DOMAINS))
 
-# Source tiers: 1 primary (official statistics, institutions, parliaments, international bodies, public research, Our World in
-# Data), 2 big newspapers and well-known media, 3 the rest. A domain matches itself and its subdomains.
+# Source tiers: 1 primary (official statistics, institutions, international bodies, public research, Our World in Data), 2 big
+# newspapers and well-known media, 3 the rest. A domain matches itself and its subdomains. The Assemblée nationale and the
+# Sénat are not tier 1 (owner, 2026-11-16): their reports are political, not statistics (a Senate inquiry's 211 Md€ of aid
+# to firms, where the statistical bodies count 108 to 112 Md€, made a "200 milliards" claim "mixte").
 FIRST_PARTY = tuple(url.split("//", 1)[1].split("/", 1)[0].removeprefix("www.") for _, url in CATALOG) + (
     "ec.europa.eu", "europa.eu", "dares.travail-emploi.gouv.fr", "drees.solidarites-sante.gouv.fr", "ined.fr", "inrae.fr",
     "cnrs.fr", "cepii.fr", "strategie.gouv.fr", "cae-eco.fr", "cor-retraites.fr", "ademe.fr", "conseil-constitutionnel.fr",
