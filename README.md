@@ -52,7 +52,7 @@ Python 3.12 or later.
 | `CHECK_RETRY_THINKING` | `default` | the same, for the retry when the first answer cites no usable page |
 | `GEMINI_PREFLIGHT_MODEL` | `gemini-3.5-flash-lite` | the model that writes the Linkup query (temperature 0, fixed seed: one claim, one query) |
 | `GEMINI_QUERY_SEED` | `20261116` | that seed |
-| `QUERY_CACHE` | `logs/queries.jsonl` | the queries written, one line per claim: a claim checked again searches with the same words; empty = none kept |
+| `QUERY_CACHE` | (none) | for benchmarks: a file that keeps each query written, one line per claim, so a claim replayed searches with the same words |
 | `GEMINI_API_VERSION` | `v1` | Gemini API version |
 | `CHECK_LOG` | `logs` | folder of the journal of the checks (see below); empty = none |
 | `HOST`, `PORT` | `127.0.0.1`, `8050` | where the service listens |
@@ -218,7 +218,7 @@ Python 3.12 ou plus récent.
 | `CHECK_RETRY_THINKING` | `default` | la même chose, pour le nouvel essai quand la première réponse ne cite aucune page utilisable |
 | `GEMINI_PREFLIGHT_MODEL` | `gemini-3.5-flash-lite` | le modèle qui écrit la requête Linkup (température 0, graine fixe : une affirmation, une requête) |
 | `GEMINI_QUERY_SEED` | `20261116` | cette graine |
-| `QUERY_CACHE` | `logs/queries.jsonl` | les requêtes écrites, une ligne par affirmation : une affirmation revérifiée cherche avec les mêmes mots ; vide = aucune gardée |
+| `QUERY_CACHE` | (aucun) | pour les bancs d'essai : un fichier qui garde chaque requête écrite, une ligne par affirmation, pour qu'une affirmation rejouée cherche avec les mêmes mots |
 | `GEMINI_API_VERSION` | `v1` | version de l'API Gemini |
 | `CHECK_LOG` | `logs` | dossier du journal des vérifications (voir plus bas) ; vide = aucun |
 | `HOST`, `PORT` | `127.0.0.1`, `8050` | où le service écoute |

@@ -54,9 +54,9 @@ QUERY_MODEL = os.environ.get("GEMINI_PREFLIGHT_MODEL", "gemini-3.5-flash-lite") 
 # two queries for one claim shared 0 to 7 of their 12 pages; deterministic, the same query 3 times out of 3 on 8 claims
 # (2026-11-16, ~/bench/2026-11-16-linkup-query*/ on the Classic box)
 QUERY_SEED = int(os.environ.get("GEMINI_QUERY_SEED", "20261116"))
-# Each query written is kept (one JSON line per claim, keyed by the query prompt): a claim checked again searches Linkup
-# with the same words. "" = none kept
-QUERY_CACHE = os.environ.get("QUERY_CACHE", str(HERE / "logs" / "queries.jsonl"))
+# For benchmarks only: a file where each query written is kept (one JSON line per claim, keyed by the query prompt), so a
+# claim replayed searches Linkup with the same words. Unset in production: no query is kept
+QUERY_CACHE = os.environ.get("QUERY_CACHE", "")
 API_VERSION = os.environ.get("GEMINI_API_VERSION", "v1")
 CHECK_ORDER = os.environ.get("CHECK_ORDER", "google_first")         # google_first | linkup_first
 # how much the check thinks: low | medium | high | default (the model's own). gemini-4-hydrogen at its default took 3 to 5
