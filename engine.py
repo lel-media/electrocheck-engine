@@ -48,7 +48,7 @@ logging.getLogger("google_genai").setLevel(logging.ERROR)           # its "autom
 
 GEMINI_KEY = os.environ.get("API_GEMINI", "")
 LINKUP_KEY = os.environ.get("API_LINKUP", "")                       # recommended: without it, Gemini's own search only
-MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.8-flash")           # the check
+MODEL = os.environ.get("GEMINI_MODEL", "gemini-4-hydrogen")           # the check
 QUERY_MODEL = os.environ.get("GEMINI_PREFLIGHT_MODEL", "gemini-3.5-flash-lite")   # the Linkup query
 API_VERSION = os.environ.get("GEMINI_API_VERSION", "v1")
 CHECK_ORDER = os.environ.get("CHECK_ORDER", "google_first")         # google_first | linkup_first

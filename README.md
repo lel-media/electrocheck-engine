@@ -47,7 +47,7 @@ Python 3.12 or later.
 | `API_GEMINI` | (required) | Gemini API key |
 | `API_LINKUP` | empty | Linkup API key, recommended; empty = `google_first` only, with Gemini's own search |
 | `CHECK_ORDER` | `google_first` | `linkup_first` or `google_first` (a request can ask for either) |
-| `GEMINI_MODEL` | `gemini-3.8-flash` | the model that checks |
+| `GEMINI_MODEL` | `gemini-4-hydrogen` | the model that checks |
 | `GEMINI_PREFLIGHT_MODEL` | `gemini-3.5-flash-lite` | the model that writes the Linkup query |
 | `GEMINI_API_VERSION` | `v1` | Gemini API version |
 | `CHECK_LOG` | `logs` | folder of the journal of the checks (see below); empty = none |
@@ -209,7 +209,7 @@ Python 3.12 ou plus récent.
 | `API_GEMINI` | (obligatoire) | clé d'API Gemini |
 | `API_LINKUP` | vide | clé d'API Linkup, recommandée ; vide = `google_first` uniquement, avec la recherche de Gemini seule |
 | `CHECK_ORDER` | `google_first` | `linkup_first` ou `google_first` (une requête peut demander l'un ou l'autre) |
-| `GEMINI_MODEL` | `gemini-3.8-flash` | le modèle qui vérifie |
+| `GEMINI_MODEL` | `gemini-4-hydrogen` | le modèle qui vérifie |
 | `GEMINI_PREFLIGHT_MODEL` | `gemini-3.5-flash-lite` | le modèle qui écrit la requête Linkup |
 | `GEMINI_API_VERSION` | `v1` | version de l'API Gemini |
 | `CHECK_LOG` | `logs` | dossier du journal des vérifications (voir plus bas) ; vide = aucun |
