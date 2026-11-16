@@ -56,7 +56,7 @@ class Gemini:
 
 
 def level(config):
-    """The thinking level a call asked for, "high" or None."""
+    """The thinking level a call asked for, "low", "high" or None (the model's own)."""
     return str(getattr(config.thinking_config.thinking_level, "value", config.thinking_config.thinking_level)).lower() if config.thinking_config else None
 
 
@@ -107,7 +107,7 @@ def test_no_usable_link_goes_through_linkup_and_pages_are_cited_by_number_or_url
     _, answer, searched = run(g, pages=PAGES)
     assert [b["q"] for b in searched] == ["Le chômage a baissé."] and len(g.calls) == 2
     first_call, second_call = g.calls
-    assert second_call["search"] and second_call["url_context"] and second_call["thinking"] is None and not first_call["url_context"]
+    assert second_call["search"] and second_call["url_context"] and second_call["thinking"] == "low" and not first_call["url_context"]
     assert "de mémoire" in second_call["prompt"] and "1. [grand média] Franceinfo" in second_call["prompt"]
     assert "https://www.lemonde.fr/b-é2.html" in second_call["prompt"]
     assert urls(answer) == ["https://www.franceinfo.fr/a-1.html", "https://www.lemonde.fr/b-é2.html"]
@@ -118,12 +118,12 @@ def test_no_page_cited_means_one_more_try_thinking_harder(run):
     g = Gemini(reply(FIRST), reply(informed([{"title": "x", "url": "https://x.example/p"}])),
                reply(informed([{"page": 2}])))
     _, answer, _ = run(g, pages=PAGES)
-    assert [c["thinking"] for c in g.calls] == [None, None, "high"] and g.calls[1]["prompt"] == g.calls[2]["prompt"]
+    assert [c["thinking"] for c in g.calls] == ["low", "low", None] and g.calls[1]["prompt"] == g.calls[2]["prompt"]
     assert urls(answer) == ["https://www.lemonde.fr/b-é2.html"]
     assert answer["attempts"] == [                                                  # every answer is kept, the replaced ones too
-        {"call": "gemini_1", "thinking": None, "verdict": "faux", "confidence": 0.6, "usable_sources": 0},
-        {"call": "gemini_2", "thinking": None, "verdict": "plutot_faux", "confidence": 0.9, "usable_sources": 0},
-        {"call": "gemini_3", "thinking": "high", "verdict": "plutot_faux", "confidence": 0.9, "usable_sources": 1}]
+        {"call": "gemini_1", "thinking": "low", "verdict": "faux", "confidence": 0.6, "usable_sources": 0},
+        {"call": "gemini_2", "thinking": "low", "verdict": "plutot_faux", "confidence": 0.9, "usable_sources": 0},
+        {"call": "gemini_3", "thinking": None, "verdict": "plutot_faux", "confidence": 0.9, "usable_sources": 1}]
 
 
 def test_nothing_cited_even_thinking_harder_leaves_no_source(run):
@@ -152,7 +152,7 @@ def test_without_a_linkup_key_unsearched_urls_are_dropped_and_there_is_no_second
 def test_linkup_finding_nothing_still_tries_once_more_thinking_harder_on_the_plain_prompt(run):
     g = Gemini(reply(FIRST), reply(FIRST, GROUNDING, queries=2))
     _, answer, searched = run(g, pages=[])
-    assert len(searched) == 1 and [c["thinking"] for c in g.calls] == [None, "high"]
+    assert len(searched) == 1 and [c["thinking"] for c in g.calls] == ["low", None]
     assert "Pages trouvées" not in g.calls[1]["prompt"] and urls(answer) == [GROUNDING[0]["url"]]
 
 
@@ -181,7 +181,7 @@ def test_linkup_first_searches_with_the_written_query_and_asks_gemini_once(run):
     _, answer, searched = run(g, pages=PAGES, check_order="linkup_first", **FAURE)
     assert [(b["q"], b.get("fromDate")) for b in searched] == [(QUERY["query"], "2025-10-01")] and len(g.calls) == 1
     call = g.calls[0]
-    assert call["search"] and call["url_context"] and call["thinking"] is None
+    assert call["search"] and call["url_context"] and call["thinking"] == "low"
     assert "Première analyse" not in call["prompt"] and "1. [grand média] Franceinfo" in call["prompt"] and "source primaire" in call["prompt"]
     assert urls(answer) == ["https://www.franceinfo.fr/a-1.html"]
 
@@ -189,9 +189,9 @@ def test_linkup_first_searches_with_the_written_query_and_asks_gemini_once(run):
 def test_linkup_first_tries_once_more_thinking_harder_when_no_page_is_cited(run):
     g = Gemini(reply(informed([{"title": "x", "url": "https://x.example/p"}])), reply(informed([{"page": 2}])))
     _, answer, _ = run(g, pages=PAGES, check_order="linkup_first", **FAURE)
-    assert [c["thinking"] for c in g.calls] == [None, "high"] and g.calls[0]["prompt"] == g.calls[1]["prompt"]
+    assert [c["thinking"] for c in g.calls] == ["low", None] and g.calls[0]["prompt"] == g.calls[1]["prompt"]
     assert urls(answer) == ["https://www.lemonde.fr/b-é2.html"]
-    assert [(a["call"], a["thinking"], a["usable_sources"]) for a in answer["attempts"]] == [("gemini_1", None, 0), ("gemini_2", "high", 1)]
+    assert [(a["call"], a["thinking"], a["usable_sources"]) for a in answer["attempts"]] == [("gemini_1", "low", 0), ("gemini_2", None, 1)]
 
 
 def test_linkup_first_with_no_page_falls_back_to_gemini_alone(run):
@@ -471,16 +471,16 @@ def test_a_check_leaves_one_journal_line_with_everything_that_decided_it(run, mo
     assert row["linkup"]["query"] == QUERY["query"] and row["linkup"]["from_date"] == "2025-10-01" and row["linkup"]["written_by"] == "llm"
     assert [p["url"] for p in row["linkup"]["pages"]] == [p["url"] for p in PAGES] and row["linkup"]["failed"] is None
     first, second = row["attempts"]                                   # the replaced answer is kept, with its reasoning
-    assert (first["call"], first["thinking"], first["verdict"], first["explanation"], first["usable_sources"]) == ("gemini_1", None, "faux", "de mémoire", 0)
+    assert (first["call"], first["thinking"], first["verdict"], first["explanation"], first["usable_sources"]) == ("gemini_1", "low", "faux", "de mémoire", 0)
     assert (second["call"], second["thinking"], second["usable_sources"], second["evidence"], second["own"], second["basis"]) == (
-        "gemini_2", "high", 1, "inference", True, "external_facts")
+        "gemini_2", None, 1, "inference", True, "external_facts")
     assert second["sources"][0]["says"] == "dit ceci" and second["searched"] is False and first["seconds"] >= 0
     d = row["decision"]
     assert (d["winner"], d["asked"], d["verdict"], d["calibration"], d["evidence"]) == (
         "gemini_2", "faux", "plutot_faux", "faux->plutot_faux (evidence: inference)", "inference")      # what the code made of it
     assert d["sources"][0]["url"] == "https://www.franceinfo.fr/a-1.html" and row["seconds"] >= 0
     assert answer["verdict"] == "plutot_faux" and "evidence" not in answer and "seconds" not in answer      # the answer stays lean
-    assert answer["attempts"][0] == {"call": "gemini_1", "thinking": None, "verdict": "faux", "confidence": 0.6, "usable_sources": 0}
+    assert answer["attempts"][0] == {"call": "gemini_1", "thinking": "low", "verdict": "faux", "confidence": 0.6, "usable_sources": 0}
 
 
 def test_a_failed_check_is_journaled_with_its_error(run, monkeypatch, tmp_path):

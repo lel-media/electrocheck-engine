@@ -5,7 +5,7 @@ returns the verdict, its explanation, the sources it rests on and the flags the 
 
 One check is 1 to 3 Gemini calls with Google Search, plus one Linkup web search when a Linkup key is set:
   linkup_first  a small model writes a Linkup query; Linkup's pages (primary sources first) are given to Gemini, which cites
-                them by number. No usable source: once more, thinking harder.
+                them by number. No usable source: once more, thinking harder (CHECK_THINKING, then CHECK_RETRY_THINKING).
   google_first  Gemini with Google Search alone. No usable link: Linkup's pages and Gemini again with its first answer, then
                 once more thinking harder.
 A source is usable when it is a page, not a site's homepage. Still none: the verdict comes back with no source.
@@ -52,6 +52,11 @@ MODEL = os.environ.get("GEMINI_MODEL", "gemini-4-hydrogen")           # the chec
 QUERY_MODEL = os.environ.get("GEMINI_PREFLIGHT_MODEL", "gemini-3.5-flash-lite")   # the Linkup query
 API_VERSION = os.environ.get("GEMINI_API_VERSION", "v1")
 CHECK_ORDER = os.environ.get("CHECK_ORDER", "google_first")         # google_first | linkup_first
+# how much the check thinks: low | medium | high | default (the model's own). gemini-4-hydrogen at its default took 3 to 5
+# times as long as gemini-3.8-flash; at low, a median 20 s for the same verdicts (12 claims of the Classic, 2026-11-16).
+# The retry, when the first answer cites no usable page, thinks harder.
+FIRST_THINKING = os.environ.get("CHECK_THINKING", "low").removeprefix("default") or None
+RETRY_THINKING = os.environ.get("CHECK_RETRY_THINKING", "default").removeprefix("default") or None
 # One JSON line per check in CHECK_LOG/checks-<day>.jsonl: the request, the Linkup query and pages, every Gemini call (the
 # replaced ones too) with its explanation, flags and sources, the decision and its steps. "" = no journal.
 CHECK_LOG = os.environ.get("CHECK_LOG", str(HERE / "logs"))
@@ -447,7 +452,7 @@ async def check(claim: dict) -> dict:
         if order == "linkup_first":
             pages, listing = await find_pages()
             full_prompt = prompt + prompts.PAGES_FIRST.format(pages=listing) if pages else prompt
-            for n, thinking in enumerate((None, "high"), 1):
+            for n, thinking in enumerate((FIRST_THINKING, RETRY_THINKING), 1):
                 answer = await attempt(f"gemini_{n}", full_prompt, thinking, pages)
                 if answer:
                     payload, sources, winner = *answer, f"gemini_{n}"
@@ -457,21 +462,21 @@ async def check(claim: dict) -> dict:
         else:
             # 1) Gemini + Google Search. Without a real search, the URLs it writes are from memory: not sources.
             began = time.perf_counter()
-            result = await gemini(prompt, MODEL, search=True)
+            result = await gemini(prompt, MODEL, search=True, thinking=FIRST_THINKING)
             payload, winner = result["payload"], "gemini_1"
             if not isinstance(payload, dict):
-                attempts.append({"call": "gemini_1", "thinking": None, "seconds": round(time.perf_counter() - began, 2),
+                attempts.append({"call": "gemini_1", "thinking": FIRST_THINKING, "seconds": round(time.perf_counter() - began, 2),
                                  "failed": "pas un objet JSON"})
                 raise RuntimeError("Le fact-check n'a pas renvoyé un objet JSON")
             sources = merge_sources(payload.get("sources") or [] if result["searched"] else [], result["grounding"])
-            attempts.append(describe("gemini_1", None, round(time.perf_counter() - began, 2), result["searched"], payload, sources))
+            attempts.append(describe("gemini_1", FIRST_THINKING, round(time.perf_counter() - began, 2), result["searched"], payload, sources))
             # 2) no usable link: Linkup's pages, then Gemini again with its first answer and those pages, then once more thinking
             #    harder; with no pages at all, once more thinking harder on the plain prompt.
             if LINKUP_KEY and not any(usable(s["url"]) for s in sources):
                 pages, listing = await find_pages()
                 previous = {k: payload.get(k) for k in ("verdict", "explanation", "confidence")}
                 informed = prompt + prompts.LINKUP.format(previous=json.dumps(previous, ensure_ascii=False), pages=listing)
-                for n, (full_prompt, thinking) in enumerate([(informed, None), (informed, "high")] if pages else [(prompt, "high")], 2):
+                for n, (full_prompt, thinking) in enumerate([(informed, FIRST_THINKING), (informed, RETRY_THINKING)] if pages else [(prompt, RETRY_THINKING)], 2):
                     answer = await attempt(f"gemini_{n}", full_prompt, thinking, pages)
                     if not answer:
                         continue

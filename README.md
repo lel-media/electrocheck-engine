@@ -48,6 +48,8 @@ Python 3.12 or later.
 | `API_LINKUP` | empty | Linkup API key, recommended; empty = `google_first` only, with Gemini's own search |
 | `CHECK_ORDER` | `google_first` | `linkup_first` or `google_first` (a request can ask for either) |
 | `GEMINI_MODEL` | `gemini-4-hydrogen` | the model that checks |
+| `CHECK_THINKING` | `low` | how much the check thinks: `low`, `medium`, `high` or `default` (the model's own) |
+| `CHECK_RETRY_THINKING` | `default` | the same, for the retry when the first answer cites no usable page |
 | `GEMINI_PREFLIGHT_MODEL` | `gemini-3.5-flash-lite` | the model that writes the Linkup query |
 | `GEMINI_API_VERSION` | `v1` | Gemini API version |
 | `CHECK_LOG` | `logs` | folder of the journal of the checks (see below); empty = none |
@@ -210,6 +212,8 @@ Python 3.12 ou plus récent.
 | `API_LINKUP` | vide | clé d'API Linkup, recommandée ; vide = `google_first` uniquement, avec la recherche de Gemini seule |
 | `CHECK_ORDER` | `google_first` | `linkup_first` ou `google_first` (une requête peut demander l'un ou l'autre) |
 | `GEMINI_MODEL` | `gemini-4-hydrogen` | le modèle qui vérifie |
+| `CHECK_THINKING` | `low` | combien la vérification réfléchit : `low`, `medium`, `high` ou `default` (le choix du modèle) |
+| `CHECK_RETRY_THINKING` | `default` | la même chose, pour le nouvel essai quand la première réponse ne cite aucune page utilisable |
 | `GEMINI_PREFLIGHT_MODEL` | `gemini-3.5-flash-lite` | le modèle qui écrit la requête Linkup |
 | `GEMINI_API_VERSION` | `v1` | version de l'API Gemini |
 | `CHECK_LOG` | `logs` | dossier du journal des vérifications (voir plus bas) ; vide = aucun |
