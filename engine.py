@@ -147,6 +147,7 @@ VERDICT_ALIASES = {"true": "vrai", "false": "faux", "mostly true": "plutot_vrai"
                    "plutôt vrai": "plutot_vrai", "plutot vrai": "plutot_vrai", "plutôt faux": "plutot_faux",
                    "plutot faux": "plutot_faux", "à relire": "insuffisant", "indetermine": "insuffisant", "indéterminé": "insuffisant"}
 NEGATIVE = ("faux", "plutot_faux", "mixte")
+NOTCH = {"faux": "plutot_faux", "plutot_faux": "mixte", "vrai": "plutot_vrai", "plutot_vrai": "mixte"}   # one notch less sure
 CAPTION_CHARS = 800           # the captions given to the check
 CONTEXT_CHARS = 800           # the raw transcript around the claim (a whole transcript window: up to about 750)
 BEFORE_CHARS = 800            # what was said right before the claim: its end is kept
@@ -319,13 +320,15 @@ def figures(text: str) -> set[str]:
 
 
 def unsourced_figures(payload: dict, sources: list[dict], *said: str) -> list[str]:
-    """The figures a "faux" or "plutot_faux" verdict's summary rests on that none of its cited sources says, nor the claim itself: what
-    the verdict concludes from must be on a page it gives (2026-11-16, Attal on rental investment: "plutôt faux" because of
-    "3,1 Md€ (+14 %)", a fact neither cited page gave - and the post, held to the pages, then read as "true")."""
-    if normal_verdict(payload.get("verdict")) not in ("faux", "plutot_faux"):      # "mixte" says both: not concerned
+    """The figures of a verdict's summary and explanation that none of its cited sources says, nor the claim itself: what a
+    verdict states must be on a page it gives (2026-11-16, Attal on rental investment: "plutôt faux" because of "3,1 Md€
+    (+14 %)", a fact neither cited page gave, and the post, held to the pages, then read as "true"; Glucksmann, "travailleurs
+    pauvres", natalité: explanations full of figures their one source did not give. Owner: whatever the verdict)."""
+    if normal_verdict(payload.get("verdict")) == "insuffisant":
         return []
     have = set().union(*(figures(s.get("says") or "") for s in sources), *(figures(t) for t in said))
-    return sorted(figures(str(payload.get("summary") or "")) - have)
+    stated = figures(str(payload.get("summary") or "")) | figures(str(payload.get("explanation") or ""))
+    return sorted(stated - have)
 
 
 def normal_verdict(raw) -> str:
@@ -612,10 +615,9 @@ async def check(claim: dict) -> dict:
                 verdict, guard = "insuffisant", f"evidence:{evidence or 'missing'}"
             elif verdict == "faux" and evidence == "inference":
                 verdict, calibration = "plutot_faux", "faux->plutot_faux (evidence: inference)"
-            # still resting on figures no cited page gives: one notch lower (the owner's rule: lower rather than nothing)
-            if verdict in ("faux", "plutot_faux") and (missing := unsourced_figures({**payload, "verdict": verdict}, sources,
-                                                                                   text, quote, meant)):
-                lower = {"faux": "plutot_faux", "plutot_faux": "mixte"}[verdict]
+            # still stating figures no cited page gives: one notch less sure (the owner's rule: lower rather than nothing)
+            if verdict in NOTCH and (missing := unsourced_figures({**payload, "verdict": verdict}, sources, text, quote, meant)):
+                lower = NOTCH[verdict]
                 calibration = f"{verdict}->{lower} (figures no cited source gives: {', '.join(missing)})"
                 verdict = lower
             if verdict != asked:

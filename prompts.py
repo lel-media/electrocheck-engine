@@ -28,9 +28,18 @@ Règles :
   sujet), la phrase entière et ce qui suit, pas dans un
   sens littéral ou technique qu'il ne lui donne pas : une formule (« je n'ai jamais… », « au bord de la faillite »)
   se vérifie pour ce qu'elle veut dire. Si ce sens est exact mais que la lettre est fausse (ou l'inverse), c'est
-  "mixte". Écris dans "meant" le sens que tu as jugé. Exemple : « Personne ne parle jamais des agriculteurs », dit en
+  "mixte", sauf un chiffre exact dit dans une formulation approximative (règle suivante). Écris dans "meant" le sens que
+  tu as jugé. Exemple : « Personne ne parle jamais des agriculteurs », dit en
   plein débat et suivi de « vous, vous n'en parlez pas », veut dire « on n'en parle pas dans ce débat » ; juger qu'on
   en parle ailleurs, c'est juger un sens qu'il ne lui donne pas.
+- Un chiffre cité de mémoire se juge sur la statistique publique à laquelle {speaker} se réfère vraisemblablement.
+  D'après le contexte (le sujet, ce qui précède, la phrase entière), cherche d'abord quelle statistique officielle
+  correspond à son chiffre. Si son chiffre correspond à cette statistique et que seule la formulation est approximative
+  (un mot plus large ou plus fort que celui de la statistique, une population ou une durée arrondies), rends
+  « plutot_vrai » et dis l'imprécision dans l'explication ; « vrai » si la formulation est fidèle. Écris dans "meant"
+  l'affirmation dans ce sens. Ne juge à la lettre que si aucune statistique plausible ne correspond à son chiffre. La
+  statistique de référence doit venir de tes sources, jamais être supposée, et elle doit être celle dont parle le
+  contexte, pas une autre choisie pour lui donner raison.
 - Un mot de temps fixe la période jugée : « aujourd'hui », « actuellement » = la situation ou le chiffre récents,
   pas un cumul sur plusieurs années.
 - Un montant d'« économies », d'« effort », de « coupes » ou de « baisse » (dépenses, déficit, budget) se juge aussi sur
@@ -82,8 +91,10 @@ Règles :
   est directe), pas "mixte".
 - si les sources se contredisent ou manquent : verdict "insuffisant" et confiance basse ;
 - NE MÉLANGE PAS LES SOURCES : chaque fait et chaque chiffre de l'explication vient d'une source de "sources", et le
-  "says" de cette source le contient (ce que la page établit, avec ses chiffres, en une phrase) ; n'attribue jamais à une
-  source ce qu'elle ne dit pas, et n'écris rien dans l'explication qui ne soit dans le "says" d'une source ;
+  "says" de cette source le contient (TOUS les faits et chiffres que tu tires de cette page, en une ou plusieurs
+  phrases) ; n'attribue jamais à une source ce qu'elle ne dit pas, et n'écris rien dans l'explication ni dans "summary"
+  qui ne soit dans le "says" d'une source : un fait que tu connais sans l'avoir lu dans une page citée n'y entre pas, et
+  ton verdict ne repose que sur ce que disent les pages citées ;
 - ne jamais inventer une URL.
 
 Le contexte brut et les sous-titres CC ne sont là que pour lever une ambiguïté (noms, chiffres),
@@ -108,7 +119,7 @@ Réponds UNIQUEMENT avec un JSON :
   "scope_ok": true,
   "basis": "external_facts|speaker_statements|none",
   "evidence": "direct|inference|absence",
-  "sources": [{"title": "...", "url": "https://...", "says": "ce que cette page établit, avec ses chiffres"}]
+  "sources": [{"title": "...", "url": "https://...", "says": "tous les faits et chiffres que tu tires de cette page"}]
 }
 """
 
@@ -123,7 +134,7 @@ Pages trouvées par une recherche web pour cette affirmation (numérotées) :
 
 Appuie-toi sur ces pages (lis-les avec l'outil de lecture d'URL si besoin) et sur ta recherche Google, puis donne
 ton verdict définitif dans le même format JSON. Pour "sources", renvoie un objet {{"page": <numéro dans la liste
-ci-dessus>, "title": "...", "says": "ce que cette page établit, avec ses chiffres"}} pour chaque page de la liste que tu
+ci-dessus>, "title": "...", "says": "tous les faits et chiffres que tu tires de cette page"}} pour chaque page de la liste que tu
 as réellement utilisée. Au moins une page de la liste doit figurer dans "sources" dès qu'elle éclaire l'affirmation.
 """
 
@@ -137,7 +148,7 @@ Appuie-toi sur ces pages (lis-les avec l'outil de lecture d'URL si besoin) et su
 des articles de presse et qu'une source primaire couvre le sujet (statistique officielle, rapport, texte de loi), cherche-la
 et cite-la. Pour "sources", renvoie un objet {{"page": <numéro dans la liste ci-dessus>, "title": "...", "says": "..."}} pour
 chaque page de la liste que tu as réellement utilisée, et {{"title": "...", "url": "...", "says": "..."}} pour une page trouvée par
-ta propre recherche ("says" : ce que la page établit, avec ses chiffres). Les pages sont classées : sources primaires d'abord.
+ta propre recherche ("says" : tous les faits et chiffres que tu tires de cette page). Les pages sont classées : sources primaires d'abord.
 Au moins une page de la liste doit figurer dans "sources" dès qu'elle éclaire l'affirmation.
 """
 
@@ -169,6 +180,7 @@ JSON_REPAIR = 'Réécris le texte suivant en JSON strict, sans markdown, sans co
 # appended to the check's prompt when its negative verdict rested on figures none of its cited pages gives
 UNSOURCED = """
 
-Ta réponse précédente concluait « {verdict} » en s'appuyant sur des chiffres qu'aucune des sources que tu cites ne donne
-({figures}). Un verdict négatif doit reposer sur un fait qu'une source citée dit : cite la page qui donne ces chiffres,
-avec ce qu'elle dit dans « says », ou revois le verdict à partir de ce que disent vraiment tes sources."""
+Ta réponse précédente concluait « {verdict} » avec des chiffres qu'aucune des sources que tu cites ne donne dans son
+« says » ({figures}). Ton verdict, ton résumé et ton explication ne reposent que sur ce que disent les pages citées : cite
+la page qui donne ces chiffres, avec tout ce que tu en tires dans « says », ou retire-les et revois le verdict à partir de
+ce que disent vraiment tes sources."""

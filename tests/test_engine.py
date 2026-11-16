@@ -550,7 +550,7 @@ def test_a_negative_verdict_on_figures_no_cited_page_gives_is_asked_again(run):
     g = Gemini(reply(negative([DESERTED], summary)), reply(negative([DESERTED, INSTITUTIONS], summary)))
     _, answer, _ = run(g, pages=PAGES, check_order="linkup_first", **ATTAL)
     assert [c["thinking"] for c in g.calls] == ["low", "medium"]
-    assert "14, 3.1" in g.calls[1]["prompt"] and "cite la page qui donne ces chiffres" in g.calls[1]["prompt"]
+    assert "14, 3.1" in g.calls[1]["prompt"] and "la page qui donne ces chiffres" in g.calls[1]["prompt"]
     assert answer["verdict"] == "plutot_faux" and len(answer["sources"]) == 2              # now cited: kept
 
 
@@ -568,6 +568,13 @@ def test_figures_from_the_pages_or_the_claim_and_years_need_nothing_more(run):
     g = Gemini(reply(negative([DESERTED], ok)))
     _, answer, _ = run(g, pages=PAGES, check_order="linkup_first", **ATTAL)
     assert len(g.calls) == 1 and answer["verdict"] == "plutot_faux"
-    g = Gemini(reply(negative([DESERTED], "C'est vrai : 3,1 milliards investis.", "vrai")))     # a true verdict: not concerned
-    assert run(g, pages=PAGES, check_order="linkup_first", **ATTAL)[1]["verdict"] == "vrai" and len(g.calls) == 1
+    # every verdict (owner): a "vrai" on a figure no page gives is asked again too, then one notch less sure
+    g = Gemini(reply(negative([DESERTED], "C'est vrai : 3,1 milliards investis.", "vrai")),
+               reply(negative([DESERTED], "C'est vrai : 3,1 milliards investis.", "vrai")))
+    assert run(g, pages=PAGES, check_order="linkup_first", **ATTAL)[1]["verdict"] == "plutot_vrai" and len(g.calls) == 2
+    g = Gemini(reply({**negative([DESERTED], "Les investisseurs sont tombés à 8 % des prêts.", "vrai"),
+                      "explanation": "Selon le réseau, 8 % des prêts en 2026 contre 20 % avant ; 3,1 milliards ailleurs."}),
+               reply(negative([DESERTED, INSTITUTIONS], "Les investisseurs sont tombés à 8 % des prêts.", "vrai")))
+    _, answer, _ = run(g, pages=PAGES, check_order="linkup_first", **ATTAL)          # the explanation counts, not only the summary
+    assert len(g.calls) == 2 and answer["verdict"] == "vrai"
     assert engine.figures("3,1 milliards, 500 000 euros, 14 %, en 2026") == {"3.1", "500000", "14"}
