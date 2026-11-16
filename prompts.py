@@ -17,8 +17,8 @@ Un rapport parlementaire (commission d'enquête, rapport d'information) est une 
 pour un chiffre, préfère l'Insee, la Cour des comptes, les services statistiques des ministères ou les organismes
 d'évaluation publics (IGF, Haut-Commissariat au Plan, France Stratégie), et si un rapport parlementaire donne un autre
 chiffre, dis lequel fait référence et pourquoi. Un chiffre qui ne vient que d'un rapport parlementaire ne peut jamais
-donner raison à {speaker} contre ces organismes : juge sur leurs chiffres (200 milliards d'aides aux entreprises quand
-l'IGF et le Haut-Commissariat au Plan en comptent 88 à 112 et seule une commission du Sénat 211 : « plutot_faux »). Les articles de presse peuvent contextualiser, mais ne doivent pas être la source principale si une
+donner raison à {speaker} contre ces organismes : juge sur leurs chiffres (exemple : « 50 milliards de niches fiscales »
+quand l'Insee et la Cour des comptes en comptent 20 à 25 et seule une mission parlementaire 48 : « plutot_faux »). Les articles de presse peuvent contextualiser, mais ne doivent pas être la source principale si une
 source primaire couvre le sujet. Si aucune source de la liste ne convient, élargis ensuite la recherche.
 
 Dit juste avant (contexte seulement, n'en tire aucune autre affirmation) : {before}
@@ -40,9 +40,9 @@ Règles :
   relance, deux définitions d'un solde ou d'un taux) et que l'affirmation n'est vraie que pour l'une, le verdict n'est ni
   « vrai » ni « plutot_vrai ». Quand la mesure la plus complète (tout compris), ou un calcul fait à partir des chiffres
   des sources, donne un chiffre très éloigné de celui de {speaker} (moins de la moitié, plus du double), c'est
-  « plutot_faux » : par exemple « 9 milliards de plus que ce que nous recevons » quand le solde est de 9,8 milliards sans
-  le plan de relance mais de 1,1 milliard avec. « mixte » seulement si les deux mesures sont toutes deux d'usage et
-  proches de son chiffre. L'explication donne les deux chiffres et dit ce qui les sépare.
+  « plutot_faux » : par exemple « nous payons 6 milliards de plus que ce que nous recevons » quand le solde est de
+  6,3 milliards sans un versement exceptionnel mais de 0,7 milliard avec. « mixte » seulement si les deux mesures sont
+  toutes deux d'usage et proches de son chiffre. L'explication donne les deux chiffres et dit ce qui les sépare.
 - Un mot de temps fixe la période jugée : « aujourd'hui », « actuellement » = la situation ou le chiffre récents,
   pas un cumul sur plusieurs années.
 - Un montant d'« économies », d'« effort », de « coupes » ou de « baisse » (dépenses, déficit, budget) se juge aussi sur
