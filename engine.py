@@ -154,7 +154,7 @@ AFTER_CHARS = 800             # what was said right after the claim
 SAYS_CHARS = 400              # what a source says, in the answer
 JSON_ATTEMPTS = 2             # a JSON-only answer with a stray character is asked again: the same prompt almost always comes back clean
 LEAN = ("call", "thinking", "verdict", "confidence", "usable_sources", "failed")      # what the answer keeps of each call
-PROMPT_VERSION = hashlib.sha1("".join((prompts.CHECK, prompts.PAGES_FIRST, prompts.LINKUP, prompts.QUERY)).encode()).hexdigest()[:8]
+PROMPT_VERSION = hashlib.sha1("".join((prompts.CHECK, prompts.PAGES_FIRST, prompts.LINKUP, prompts.QUERY, prompts.UNSOURCED)).encode()).hexdigest()[:8]
 PARIS = ZoneInfo("Europe/Paris")
 MONTHS = ("janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre")
 
@@ -302,6 +302,35 @@ def same_page(url: str) -> tuple[str, str, str]:
     """A page however the model spells its URL: host without www, decoded path without a trailing slash, query."""
     p = urlparse(url.strip())
     return (p.hostname or "").removeprefix("www."), unquote(p.path).rstrip("/"), unquote(p.query)
+
+
+_FIGURE = re.compile(r"\d+(?:[ \u00a0\u202f.]\d{3})*(?:[.,]\d+)?")
+
+
+def figures(text: str) -> set[str]:
+    """The figures of a text, spelt one way ("3,1" = "3.1", "500 000" = "500000"); years (1800-2100) left out: a verdict
+    dates its facts, its sources often do not."""
+    out = set()
+    for m in _FIGURE.finditer(text or ""):
+        v = re.sub(r"[ \u00a0\u202f.](?=\d{3}(?!\d))", "", m.group()).replace(",", ".")
+        if not (v.isdigit() and 1800 <= int(v) <= 2100):
+            out.add(v)
+    return out
+
+
+def unsourced_figures(payload: dict, sources: list[dict], *said: str) -> list[str]:
+    """The figures a "faux" or "plutot_faux" verdict's summary rests on that none of its cited sources says, nor the claim itself: what
+    the verdict concludes from must be on a page it gives (2026-11-16, Attal on rental investment: "plutôt faux" because of
+    "3,1 Md€ (+14 %)", a fact neither cited page gave - and the post, held to the pages, then read as "true")."""
+    if normal_verdict(payload.get("verdict")) not in ("faux", "plutot_faux"):      # "mixte" says both: not concerned
+        return []
+    have = set().union(*(figures(s.get("says") or "") for s in sources), *(figures(t) for t in said))
+    return sorted(figures(str(payload.get("summary") or "")) - have)
+
+
+def normal_verdict(raw) -> str:
+    raw = str(raw or "").strip().lower()
+    return raw if raw in VERDICTS else VERDICT_ALIASES.get(raw.replace("_", " "), VERDICT_ALIASES.get(raw, "insuffisant"))
 
 
 def usable(url: str) -> bool:
@@ -508,7 +537,13 @@ async def check(claim: dict) -> dict:
                 if answer:
                     payload, sources, winner = *answer, f"gemini_{n}"
                     if any(usable(s["url"]) for s in sources):
-                        break
+                        missing = unsourced_figures(payload, sources, text, quote, meant)
+                        if not missing:
+                            break
+                        # a negative verdict on figures no cited page gives: once more, asked to cite them or rethink
+                        log.info("%s: %s on figures no cited source gives: %s", said, payload.get("verdict"), ", ".join(missing))
+                        full_prompt += prompts.UNSOURCED.format(verdict=payload.get("verdict"), figures=", ".join(missing))
+                        continue
                     log.info("%s: no usable source (linkup_first, thinking %s)", said, thinking)
         else:
             # 1) Gemini + Google Search. Without a real search, the URLs it writes are from memory: not sources.
@@ -577,6 +612,12 @@ async def check(claim: dict) -> dict:
                 verdict, guard = "insuffisant", f"evidence:{evidence or 'missing'}"
             elif verdict == "faux" and evidence == "inference":
                 verdict, calibration = "plutot_faux", "faux->plutot_faux (evidence: inference)"
+            # still resting on figures no cited page gives: one notch lower (the owner's rule: lower rather than nothing)
+            if verdict in ("faux", "plutot_faux") and (missing := unsourced_figures({**payload, "verdict": verdict}, sources,
+                                                                                   text, quote, meant)):
+                lower = {"faux": "plutot_faux", "plutot_faux": "mixte"}[verdict]
+                calibration = f"{verdict}->{lower} (figures no cited source gives: {', '.join(missing)})"
+                verdict = lower
             if verdict != asked:
                 log.info("%s: verdict %s -> %s (%s)", said, asked, verdict, guard or calibration)
 

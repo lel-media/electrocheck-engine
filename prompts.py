@@ -164,3 +164,11 @@ JSON uniquement : {{"query": "...", "from_date": null}}
 
 # A search-grounded answer is free text: when it is not valid JSON, the model rewrites it as JSON.
 JSON_REPAIR = 'Réécris le texte suivant en JSON strict, sans markdown, sans commentaire. Conserve tous les champs et leurs valeurs.\n\n'
+
+
+# appended to the check's prompt when its negative verdict rested on figures none of its cited pages gives
+UNSOURCED = """
+
+Ta réponse précédente concluait « {verdict} » en s'appuyant sur des chiffres qu'aucune des sources que tu cites ne donne
+({figures}). Un verdict négatif doit reposer sur un fait qu'une source citée dit : cite la page qui donne ces chiffres,
+avec ce qu'elle dit dans « says », ou revois le verdict à partir de ce que disent vraiment tes sources."""

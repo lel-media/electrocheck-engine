@@ -530,3 +530,44 @@ def test_no_journal_when_it_is_switched_off_and_a_broken_one_never_stops_a_check
     monkeypatch.setattr(engine, "CHECK_LOG", str(blocked / "logs"))                      # cannot be created
     status, answer, _ = run(Gemini(reply(FIRST, GROUNDING, queries=1)), linkup_key="")
     assert status == 200 and answer["verdict"] == "faux"
+
+
+# ---------------------------------------------------------------- a negative verdict on figures no cited page gives
+
+ATTAL = {"claim": "Aujourd'hui, personne n'a d'intérêt à faire de l'investissement locatif en France.", "speaker": "Gabriel Attal",
+         "quote": "aujourd'hui personne n'a d'intérêt à faire de l'investissement locatif", "asserted_at": "2026-11-16T20:20:00+00:00"}
+DESERTED = {"page": 1, "says": "Les investisseurs ont déserté le marché locatif en 2026 : 8 % des prêts contre 20 % avant."}
+INSTITUTIONS = {"page": 2, "says": "Les institutionnels ont investi 3,1 milliards d'euros dans le résidentiel à fin septembre 2026 (+14 %)."}
+
+
+def negative(sources, summary, verdict="plutot_faux"):
+    return {**informed(sources, verdict), "summary": summary}
+
+
+def test_a_negative_verdict_on_figures_no_cited_page_gives_is_asked_again(run):
+    """2026-11-16: "plutôt faux" because of 3,1 Md€ (+14 %), on two pages that said neither."""
+    summary = "Les institutionnels ont investi 3,1 milliards d'euros à fin septembre 2026 (+14 %)."
+    g = Gemini(reply(negative([DESERTED], summary)), reply(negative([DESERTED, INSTITUTIONS], summary)))
+    _, answer, _ = run(g, pages=PAGES, check_order="linkup_first", **ATTAL)
+    assert [c["thinking"] for c in g.calls] == ["low", "medium"]
+    assert "14, 3.1" in g.calls[1]["prompt"] and "cite la page qui donne ces chiffres" in g.calls[1]["prompt"]
+    assert answer["verdict"] == "plutot_faux" and len(answer["sources"]) == 2              # now cited: kept
+
+
+def test_still_no_page_for_its_figures_is_one_notch_lower(run):
+    summary = "Les institutionnels ont investi 3,1 milliards d'euros à fin septembre 2026 (+14 %)."
+    g = Gemini(reply(negative([DESERTED], summary)), reply(negative([DESERTED], summary)))
+    _, answer, _ = run(g, pages=PAGES, check_order="linkup_first", **ATTAL)
+    assert len(g.calls) == 2 and answer["verdict"] == "mixte"
+    g = Gemini(reply(negative([DESERTED], summary, "faux")), reply(negative([DESERTED], summary, "faux")))
+    assert run(g, pages=PAGES, check_order="linkup_first", **ATTAL)[1]["verdict"] == "plutot_faux"
+
+
+def test_figures_from_the_pages_or_the_claim_and_years_need_nothing_more(run):
+    ok = "Les investisseurs ne font plus que 8 % des prêts en 2026, contre 20 % avant."
+    g = Gemini(reply(negative([DESERTED], ok)))
+    _, answer, _ = run(g, pages=PAGES, check_order="linkup_first", **ATTAL)
+    assert len(g.calls) == 1 and answer["verdict"] == "plutot_faux"
+    g = Gemini(reply(negative([DESERTED], "C'est vrai : 3,1 milliards investis.", "vrai")))     # a true verdict: not concerned
+    assert run(g, pages=PAGES, check_order="linkup_first", **ATTAL)[1]["verdict"] == "vrai" and len(g.calls) == 1
+    assert engine.figures("3,1 milliards, 500 000 euros, 14 %, en 2026") == {"3.1", "500000", "14"}
