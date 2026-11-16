@@ -17,10 +17,12 @@ directly or by inference, and an inferred "faux" is lowered to "plutot_faux".
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
 import hashlib
+import html
 import re
 import time
 from datetime import date, datetime, timedelta, timezone
@@ -134,6 +136,8 @@ LINKUP_URL = "https://api.linkup.so/v1/search"
 LINKUP_RESULTS = 15           # asked of Linkup
 LINKUP_PAGES = 12             # given to Gemini, best tier first
 SNIPPET_CHARS = 600           # of each page's text
+PAGE_TEXT_CHARS = 80000       # of a cited page's text, read to find the figures the verdict states (never in the prompt)
+PAGE_TIMEOUT = 6.0            # to fetch a cited page Linkup did not give the text of
 QUERY_CHARS = 700
 # nobody can cite these as a source (a video of the speaker saying the same thing is no evidence)
 LINKUP_EXCLUDE = ["facebook.com", "x.com", "twitter.com", "instagram.com", "tiktok.com", "youtube.com", "dailymotion.com",
@@ -331,6 +335,46 @@ def unsourced_figures(payload: dict, sources: list[dict], *said: str) -> list[st
     return sorted(stated - have)
 
 
+_SENTENCE = re.compile(r"(?<=[.!?;])\s+")
+_TAGS = re.compile(r"(?is)<(script|style|noscript)\b.*?</\1>|<[^>]+>")
+
+
+async def page_texts(sources: list[dict], known: dict[str, str]) -> dict[str, str]:
+    """The text of each cited page: Linkup's when it gave it, else the page fetched (a page that does not answer in
+    PAGE_TIMEOUT, or refuses, has none)."""
+    async def one(url: str) -> str:
+        if known.get(url):
+            return known[url]
+        try:
+            r = await http.get(url, timeout=PAGE_TIMEOUT, follow_redirects=True, headers={"User-Agent": "Mozilla/5.0"})
+            if r.status_code != 200 or "html" not in r.headers.get("content-type", "html"):
+                return ""
+            return " ".join(html.unescape(_TAGS.sub(" ", r.text)).split())[:PAGE_TEXT_CHARS]
+        except (httpx.HTTPError, ValueError):
+            return ""
+    urls = [s["url"] for s in sources if usable(s["url"])][:6]
+    return dict(zip(urls, await asyncio.gather(*(one(u) for u in urls))))
+
+
+async def grounded(sources: list[dict], missing: list[str], known: dict[str, str]) -> list[str]:
+    """The figures still missing once the cited pages themselves are read: the model often leaves out of a page's "says" a
+    figure the page does give. Such a figure's sentence is added to that source's "says" (the post writer may then use
+    it); a figure on none of the pages stays missing (2026-11-16: Glucksmann's Insee figures were on no cited page)."""
+    texts = await page_texts(sources, known)
+    left = []
+    for figure in missing:
+        hit = next(((url, sentence) for url, text in texts.items() for sentence in _SENTENCE.split(text)
+                    if figure in figures(sentence)), None)
+        if hit is None:
+            left.append(figure)
+            continue
+        url, sentence = hit
+        source = next(s for s in sources if s["url"] == url)
+        if sentence[:300] not in (source.get("says") or ""):
+            source["says"] = f'{source.get("says") or ""} {sentence[:300]}'.strip()
+    return left
+
+
 def normal_verdict(raw) -> str:
     raw = str(raw or "").strip().lower()
     return raw if raw in VERDICTS else VERDICT_ALIASES.get(raw.replace("_", " "), VERDICT_ALIASES.get(raw, "insuffisant"))
@@ -486,7 +530,8 @@ async def check(claim: dict) -> dict:
                 log.warning("Linkup search failed: %r", exc)
                 linkup_error, results = repr(exc)[:200], []
             pages = [{"title": str(item.get("name") or item.get("url") or "").strip(), "url": str(item.get("url") or ""),
-                      "content": " ".join(str(item.get("content") or "").split())[:SNIPPET_CHARS]}
+                      "content": " ".join(str(item.get("content") or "").split())[:SNIPPET_CHARS],
+                      "full": " ".join(str(item.get("content") or "").split())[:PAGE_TEXT_CHARS]}
                      for item in results
                      if item.get("type", "text") == "text" and urlparse(str(item.get("url") or "")).scheme in ("http", "https")]
             pages = sorted(pages, key=lambda p: tier(p["url"]))[:LINKUP_PAGES]
@@ -541,6 +586,8 @@ async def check(claim: dict) -> dict:
                     payload, sources, winner = *answer, f"gemini_{n}"
                     if any(usable(s["url"]) for s in sources):
                         missing = unsourced_figures(payload, sources, text, quote, meant)
+                        if missing:                          # read the pages themselves before asking again
+                            missing = await grounded(sources, missing, {pg["url"]: pg.get("full") or "" for pg in pages})
                         if not missing:
                             break
                         # a negative verdict on figures no cited page gives: once more, asked to cite them or rethink

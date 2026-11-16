@@ -80,6 +80,11 @@ def run(monkeypatch):
             return httpx.Response(linkup_status, json={"results": pages or []}, request=httpx.Request("POST", url))
 
         monkeypatch.setattr(httpx.AsyncClient, "post", post)
+
+        async def get(self, url, **kw):                      # a cited page fetched to read its figures: none in tests
+            return httpx.Response(404, request=httpx.Request("GET", url))
+
+        monkeypatch.setattr(httpx.AsyncClient, "get", get)
         monkeypatch.setattr(engine, "client", fake)
         monkeypatch.setattr(engine, "LINKUP_KEY", linkup_key)
         monkeypatch.setattr(engine, "CHECK_ORDER", check_order)
@@ -578,3 +583,15 @@ def test_figures_from_the_pages_or_the_claim_and_years_need_nothing_more(run):
     _, answer, _ = run(g, pages=PAGES, check_order="linkup_first", **ATTAL)          # the explanation counts, not only the summary
     assert len(g.calls) == 2 and answer["verdict"] == "vrai"
     assert engine.figures("3,1 milliards, 500 000 euros, 14 %, en 2026") == {"3.1", "500000", "14"}
+
+
+def test_a_figure_the_cited_page_gives_but_its_says_left_out_is_found_on_the_page(run):
+    """The model's "says" is a summary: a figure it left out but the page gives is sourced, and its sentence joins "says"."""
+    pages = [{"type": "text", "name": "Investir", "url": "https://investir.lesechos.fr/a.html",
+              "content": "Les prix ont reculé. La rentabilité brute se stabilise autour de 5,2 % depuis début 2025. Fin."},
+             PAGES[1]]
+    summary = "La rentabilité brute reste de 5,2 %."
+    g = Gemini(reply(negative([{"page": 1, "says": "Les prix ont reculé."}], summary)))
+    _, answer, _ = run(g, pages=pages, check_order="linkup_first", **ATTAL)
+    assert len(g.calls) == 1 and answer["verdict"] == "plutot_faux"
+    assert "5,2 % depuis début 2025" in answer["sources"][0]["says"]
