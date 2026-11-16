@@ -50,7 +50,9 @@ Python 3.12 or later.
 | `GEMINI_MODEL` | `gemini-4-hydrogen` | the model that checks |
 | `CHECK_THINKING` | `low` | how much the check thinks: `low`, `medium`, `high` or `default` (the model's own) |
 | `CHECK_RETRY_THINKING` | `default` | the same, for the retry when the first answer cites no usable page |
-| `GEMINI_PREFLIGHT_MODEL` | `gemini-3.5-flash-lite` | the model that writes the Linkup query |
+| `GEMINI_PREFLIGHT_MODEL` | `gemini-3.5-flash-lite` | the model that writes the Linkup query (temperature 0, fixed seed: one claim, one query) |
+| `GEMINI_QUERY_SEED` | `20261116` | that seed |
+| `QUERY_CACHE` | `logs/queries.jsonl` | the queries written, one line per claim: a claim checked again searches with the same words; empty = none kept |
 | `GEMINI_API_VERSION` | `v1` | Gemini API version |
 | `CHECK_LOG` | `logs` | folder of the journal of the checks (see below); empty = none |
 | `HOST`, `PORT` | `127.0.0.1`, `8050` | where the service listens |
@@ -214,7 +216,9 @@ Python 3.12 ou plus récent.
 | `GEMINI_MODEL` | `gemini-4-hydrogen` | le modèle qui vérifie |
 | `CHECK_THINKING` | `low` | combien la vérification réfléchit : `low`, `medium`, `high` ou `default` (le choix du modèle) |
 | `CHECK_RETRY_THINKING` | `default` | la même chose, pour le nouvel essai quand la première réponse ne cite aucune page utilisable |
-| `GEMINI_PREFLIGHT_MODEL` | `gemini-3.5-flash-lite` | le modèle qui écrit la requête Linkup |
+| `GEMINI_PREFLIGHT_MODEL` | `gemini-3.5-flash-lite` | le modèle qui écrit la requête Linkup (température 0, graine fixe : une affirmation, une requête) |
+| `GEMINI_QUERY_SEED` | `20261116` | cette graine |
+| `QUERY_CACHE` | `logs/queries.jsonl` | les requêtes écrites, une ligne par affirmation : une affirmation revérifiée cherche avec les mêmes mots ; vide = aucune gardée |
 | `GEMINI_API_VERSION` | `v1` | version de l'API Gemini |
 | `CHECK_LOG` | `logs` | dossier du journal des vérifications (voir plus bas) ; vide = aucun |
 | `HOST`, `PORT` | `127.0.0.1`, `8050` | où le service écoute |

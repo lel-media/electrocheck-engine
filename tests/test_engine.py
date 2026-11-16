@@ -43,6 +43,7 @@ class Gemini:
     async def generate_content(self, *, model, contents, config):
         if model == engine.QUERY_MODEL:
             self.query_prompts.append(contents)
+            self.query_config = config
             if isinstance(self.query, Exception):
                 raise self.query
             return reply(self.query or {"query": ""})
@@ -64,6 +65,8 @@ def level(config):
 def no_journal(monkeypatch):
     """The tests write no journal in the repo; the journal tests point it at a temporary folder."""
     monkeypatch.setattr(engine, "CHECK_LOG", "")
+    monkeypatch.setattr(engine, "QUERY_CACHE", "")                  # nor a kept query (the test of it points it elsewhere)
+    monkeypatch.setattr(engine, "_QUERIES", None)
 
 
 @pytest.fixture
@@ -226,6 +229,26 @@ def test_the_query_is_written_by_the_small_model_and_falls_back_to_the_claim(run
     for bad in ("2026-10-05", "2015-01-01", "hier", "2026-02-30"):                      # after the claim, too old, not a date
         _, answer, searched = run(Gemini(reply(FIRST, GROUNDING, queries=1), query={**good, "from_date": bad}), check_order="linkup_first", **FAURE)
         assert "fromDate" not in searched[0]
+
+
+def test_the_query_is_written_deterministically_and_kept_for_the_same_claim(run, monkeypatch, tmp_path):
+    """At temperature 0.1 the small model wrote another query each time: the pages of two checks of one claim had 0 to 7 of
+    12 in common (2026-11-16). Now temperature 0, a fixed seed, and the query kept: a claim checked again searches the same."""
+    monkeypatch.setattr(engine, "QUERY_CACHE", str(tmp_path / "queries.jsonl"))
+    good = {"query": "Trouve la facture pétrolière annuelle de la France (SDES, douanes) : montant, année, URL.", "from_date": "2025-10-01"}
+    g = Gemini(reply(FIRST, GROUNDING, queries=1), reply(FIRST, GROUNDING, queries=1), query=good)
+    _, _, first = run(g, check_order="linkup_first", **FAURE)
+    assert g.query_config.temperature == 0 and g.query_config.seed == engine.QUERY_SEED
+    monkeypatch.setattr(engine, "_QUERIES", None)                              # a restart: read back from the file
+    _, _, again = run(g, check_order="linkup_first", **FAURE)
+    assert len(g.query_prompts) == 1 and again[0]["q"] == first[0]["q"] == good["query"] and again[0]["fromDate"] == "2025-10-01"
+    _, _, other = run(Gemini(reply(FIRST, GROUNDING, queries=1), query=good), check_order="linkup_first", **{**FAURE, "claim": "Autre chose qui est dit."})
+    rows = [json.loads(l) for l in (tmp_path / "queries.jsonl").read_text().splitlines()]
+    assert len(rows) == 2 and rows[0]["query"] == good["query"]                 # one line per claim
+    for query in (RuntimeError("down"), {"query": "trop court"}):              # a query not written is not kept
+        monkeypatch.setattr(engine, "QUERY_CACHE", str(tmp_path / "none.jsonl"))
+        run(Gemini(reply(FIRST, GROUNDING, queries=1), query=query), check_order="linkup_first", **FAURE)
+        assert not (tmp_path / "none.jsonl").exists()
 
 
 def test_the_search_excludes_social_networks_and_keeps_text_pages_with_real_urls(run):

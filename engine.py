@@ -50,6 +50,13 @@ GEMINI_KEY = os.environ.get("API_GEMINI", "")
 LINKUP_KEY = os.environ.get("API_LINKUP", "")                       # recommended: without it, Gemini's own search only
 MODEL = os.environ.get("GEMINI_MODEL", "gemini-4-hydrogen")           # the check
 QUERY_MODEL = os.environ.get("GEMINI_PREFLIGHT_MODEL", "gemini-3.5-flash-lite")   # the Linkup query
+# The Linkup query is written at temperature 0 with a fixed seed: at 0.1 the small model wrote another query each time, and
+# two queries for one claim shared 0 to 7 of their 12 pages; deterministic, the same query 3 times out of 3 on 8 claims
+# (2026-11-16, ~/bench/2026-11-16-linkup-query*/ on the Classic box)
+QUERY_SEED = int(os.environ.get("GEMINI_QUERY_SEED", "20261116"))
+# Each query written is kept (one JSON line per claim, keyed by the query prompt): a claim checked again searches Linkup
+# with the same words. "" = none kept
+QUERY_CACHE = os.environ.get("QUERY_CACHE", str(HERE / "logs" / "queries.jsonl"))
 API_VERSION = os.environ.get("GEMINI_API_VERSION", "v1")
 CHECK_ORDER = os.environ.get("CHECK_ORDER", "google_first")         # google_first | linkup_first
 # how much the check thinks: low | medium | high | default (the model's own). gemini-4-hydrogen at its default took 3 to 5
@@ -180,11 +187,49 @@ def parse_json(text: str):
     raise ValueError("Réponse LLM sans JSON exploitable")
 
 
-async def gemini(prompt: str, model: str, *, search: bool = False, url_context: bool = False, thinking: str | None = None) -> dict:
+_QUERIES: dict[str, dict] | None = None
+
+
+def remembered_query(key: str) -> dict | None:
+    """The query written earlier for this query prompt ({"query", "from_date"}), or None."""
+    global _QUERIES
+    if not QUERY_CACHE:
+        return None
+    if _QUERIES is None:
+        _QUERIES = {}
+        try:
+            for line in Path(QUERY_CACHE).read_text(encoding="utf-8").splitlines():
+                try:
+                    row = json.loads(line)
+                    _QUERIES[row["key"]] = {"query": row["query"], "from_date": row.get("from_date")}
+                except (ValueError, KeyError, TypeError):
+                    continue
+        except OSError:
+            pass
+    return _QUERIES.get(key)
+
+
+def remember_query(key: str, value: dict) -> None:
+    if not QUERY_CACHE:
+        return
+    remembered_query(key)
+    _QUERIES[key] = value
+    try:
+        Path(QUERY_CACHE).parent.mkdir(parents=True, exist_ok=True)
+        with open(QUERY_CACHE, "a", encoding="utf-8") as f:
+            f.write(json.dumps({"key": key, **value}, ensure_ascii=False) + "\n")
+    except OSError as exc:
+        log.warning("Linkup query not kept: %r", exc)
+
+
+async def gemini(prompt: str, model: str, *, search: bool = False, url_context: bool = False, thinking: str | None = None,
+                 temperature: float = 0.1, seed: int | None = None) -> dict:
     """One Gemini answer: {"payload", "grounding" (the links of its Google searches), "searched" (it really searched: only
     then do the URLs it writes count)}. With search the answer is free text that must hold JSON; without, JSON is enforced
     and asked again once when it comes back empty or broken."""
-    config = {"temperature": 0.1}
+    config = {"temperature": temperature}
+    if seed is not None:
+        config["seed"] = seed
     if thinking:
         config["thinking_config"] = types.ThinkingConfig(thinking_level=thinking.upper())
     if search:
@@ -369,17 +414,23 @@ async def check(claim: dict) -> dict:
             # the query: an instruction written by the small model; the claim itself when it cannot be written
             query, from_date, written_by, query_error, linkup_error = text, None, "claim", None, None
             began = time.perf_counter()
-            try:
-                answer = await gemini(prompts.QUERY.format(speaker=speaker or "l'orateur", when=asserted_at.date().isoformat(),
-                                                           claim=text, meant=meant or "(le sens littéral)", quote=quote or "—"),
-                                      QUERY_MODEL)
-            except Exception as exc:                                      # a better query is a bonus, never a failure
-                log.warning("Linkup query not written (%r): searching with the claim itself", exc)
-                query_error, answer = repr(exc)[:200], None
-            payload = answer["payload"] if answer and isinstance(answer["payload"], dict) else {}
+            query_prompt = prompts.QUERY.format(speaker=speaker or "l'orateur", when=asserted_at.date().isoformat(),
+                                                claim=text, meant=meant or "(le sens littéral)", quote=quote or "—")
+            key = hashlib.sha256(f"{QUERY_MODEL}\n{query_prompt}".encode()).hexdigest()[:32]
+            payload = remembered_query(key)
+            kept = payload is not None
+            if not kept:
+                try:
+                    answer = await gemini(query_prompt, QUERY_MODEL, temperature=0.0, seed=QUERY_SEED)
+                except Exception as exc:                                  # a better query is a bonus, never a failure
+                    log.warning("Linkup query not written (%r): searching with the claim itself", exc)
+                    query_error, answer = repr(exc)[:200], None
+                payload = answer["payload"] if answer and isinstance(answer["payload"], dict) else {}
             written = " ".join(str(payload.get("query") or "").split())[:QUERY_CHARS]
             if len(written) >= 20:
-                query, written_by = written, "llm"
+                query, written_by = written, "kept" if kept else "llm"
+                if not kept:
+                    remember_query(key, {"query": written, "from_date": payload.get("from_date")})
                 # from_date: a real day before the claim, at most ten years back (the claim is about the present)
                 since_day = str(payload.get("from_date") or "").strip()
                 if isinstance(payload.get("from_date"), str) and re.fullmatch(r"\d{4}-\d{2}-\d{2}", since_day):
