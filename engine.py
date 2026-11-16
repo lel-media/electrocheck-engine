@@ -584,8 +584,15 @@ async def check(claim: dict) -> dict:
         if order == "linkup_first":
             pages, listing = await find_pages()
             full_prompt = prompt + prompts.PAGES_FIRST.format(pages=listing) if pages else prompt
+            sourced = None                   # an answer with usable sources, kept if the one asked again comes back without
             for n, thinking in enumerate((FIRST_THINKING, RETRY_THINKING), 1):
                 answer = await attempt(f"gemini_{n}", full_prompt, thinking, pages)
+                if answer and sourced and not any(usable(s["url"]) for s in answer[1]):
+                    # asked again over its figures, it came back with no usable source: the first answer stands, sources
+                    # and all (2026-11-16: three cards lost as "aucune source vérifiable"), lowered below if still unsourced
+                    log.info("%s: asked again, no usable source: the first answer stands", said)
+                    payload, sources, winner = sourced
+                    break
                 if answer:
                     payload, sources, winner = *answer, f"gemini_{n}"
                     if any(usable(s["url"]) for s in sources):
@@ -595,7 +602,8 @@ async def check(claim: dict) -> dict:
                             unreadable = unread > 0
                         if not missing:
                             break
-                        # a negative verdict on figures no cited page gives: once more, asked to cite them or rethink
+                        sourced = (payload, sources, winner)
+                        # a verdict on figures no cited page gives: once more, asked to cite them or rethink
                         log.info("%s: %s on figures no cited source gives: %s", said, payload.get("verdict"), ", ".join(missing))
                         full_prompt += prompts.UNSOURCED.format(verdict=payload.get("verdict"), figures=", ".join(missing))
                         continue

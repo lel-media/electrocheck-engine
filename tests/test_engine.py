@@ -605,3 +605,11 @@ def test_no_notch_lower_when_a_cited_page_could_not_be_read(run):
                reply(negative([{"page": 1, "says": "Les investisseurs ont déserté."}], summary)))
     _, answer, _ = run(g, pages=unread, check_order="linkup_first", **ATTAL)
     assert len(g.calls) == 2 and answer["verdict"] == "plutot_faux"
+
+
+def test_asked_again_and_back_without_a_source_the_first_answer_stands(run):
+    """2026-11-16: the second attempt, asked over figures, came back with no source; the card was lost for want of one."""
+    summary = "Les institutionnels ont investi 3,1 milliards d'euros (+14 %)."
+    g = Gemini(reply(negative([DESERTED], summary)), reply(negative([{"title": "x", "url": "https://x.example/"}], summary)))
+    _, answer, _ = run(g, pages=PAGES, check_order="linkup_first", **ATTAL)
+    assert len(g.calls) == 2 and urls(answer) == ["https://www.franceinfo.fr/a-1.html"] and answer["verdict"] == "mixte"
