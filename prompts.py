@@ -33,6 +33,10 @@ Règles :
   "mixte". Écris dans "meant" le sens que tu as jugé. Exemple : « Personne ne parle jamais des agriculteurs », dit en
   plein débat et suivi de « vous, vous n'en parlez pas », veut dire « on n'en parle pas dans ce débat » ; juger qu'on
   en parle ailleurs, c'est juger un sens qu'il ne lui donne pas.
+- Deux mesures d'un même chiffre : si les sources en donnent deux (avec ou sans un poste exceptionnel comme un plan de
+  relance, deux définitions d'un solde ou d'un taux) et que l'affirmation n'est vraie que pour l'une, le verdict n'est ni
+  « vrai » ni « plutot_vrai » : « mixte » au mieux, « plutot_faux » si la mesure qui lui donne raison laisse de côté une
+  part importante de ce qui est mesuré. L'explication donne les deux chiffres et dit ce qui les sépare.
 - Un mot de temps fixe la période jugée : « aujourd'hui », « actuellement » = la situation ou le chiffre récents,
   pas un cumul sur plusieurs années.
 - Un montant d'« économies », d'« effort », de « coupes » ou de « baisse » (dépenses, déficit, budget) se juge aussi sur
