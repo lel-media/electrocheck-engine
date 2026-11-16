@@ -63,7 +63,7 @@ CHECK_ORDER = os.environ.get("CHECK_ORDER", "google_first")         # google_fir
 # times as long as gemini-3.8-flash; at low, a median 20 s for the same verdicts (12 claims of the Classic, 2026-11-16).
 # The retry, when the first answer cites no usable page, thinks harder.
 FIRST_THINKING = os.environ.get("CHECK_THINKING", "low").removeprefix("default") or None
-RETRY_THINKING = os.environ.get("CHECK_RETRY_THINKING", "default").removeprefix("default") or None
+RETRY_THINKING = os.environ.get("CHECK_RETRY_THINKING", "medium").removeprefix("default") or None
 # One JSON line per check in CHECK_LOG/checks-<day>.jsonl: the request, the Linkup query and pages, every Gemini call (the
 # replaced ones too) with its explanation, flags and sources, the decision and its steps. "" = no journal.
 CHECK_LOG = os.environ.get("CHECK_LOG", str(HERE / "logs"))

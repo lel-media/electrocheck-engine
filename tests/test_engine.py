@@ -121,12 +121,12 @@ def test_no_page_cited_means_one_more_try_thinking_harder(run):
     g = Gemini(reply(FIRST), reply(informed([{"title": "x", "url": "https://x.example/p"}])),
                reply(informed([{"page": 2}])))
     _, answer, _ = run(g, pages=PAGES)
-    assert [c["thinking"] for c in g.calls] == ["low", "low", None] and g.calls[1]["prompt"] == g.calls[2]["prompt"]
+    assert [c["thinking"] for c in g.calls] == ["low", "low", "medium"] and g.calls[1]["prompt"] == g.calls[2]["prompt"]
     assert urls(answer) == ["https://www.lemonde.fr/b-é2.html"]
     assert answer["attempts"] == [                                                  # every answer is kept, the replaced ones too
         {"call": "gemini_1", "thinking": "low", "verdict": "faux", "confidence": 0.6, "usable_sources": 0},
         {"call": "gemini_2", "thinking": "low", "verdict": "plutot_faux", "confidence": 0.9, "usable_sources": 0},
-        {"call": "gemini_3", "thinking": None, "verdict": "plutot_faux", "confidence": 0.9, "usable_sources": 1}]
+        {"call": "gemini_3", "thinking": "medium", "verdict": "plutot_faux", "confidence": 0.9, "usable_sources": 1}]
 
 
 def test_nothing_cited_even_thinking_harder_leaves_no_source(run):
@@ -155,7 +155,7 @@ def test_without_a_linkup_key_unsearched_urls_are_dropped_and_there_is_no_second
 def test_linkup_finding_nothing_still_tries_once_more_thinking_harder_on_the_plain_prompt(run):
     g = Gemini(reply(FIRST), reply(FIRST, GROUNDING, queries=2))
     _, answer, searched = run(g, pages=[])
-    assert len(searched) == 1 and [c["thinking"] for c in g.calls] == ["low", None]
+    assert len(searched) == 1 and [c["thinking"] for c in g.calls] == ["low", "medium"]
     assert "Pages trouvées" not in g.calls[1]["prompt"] and urls(answer) == [GROUNDING[0]["url"]]
 
 
@@ -192,9 +192,9 @@ def test_linkup_first_searches_with_the_written_query_and_asks_gemini_once(run):
 def test_linkup_first_tries_once_more_thinking_harder_when_no_page_is_cited(run):
     g = Gemini(reply(informed([{"title": "x", "url": "https://x.example/p"}])), reply(informed([{"page": 2}])))
     _, answer, _ = run(g, pages=PAGES, check_order="linkup_first", **FAURE)
-    assert [c["thinking"] for c in g.calls] == ["low", None] and g.calls[0]["prompt"] == g.calls[1]["prompt"]
+    assert [c["thinking"] for c in g.calls] == ["low", "medium"] and g.calls[0]["prompt"] == g.calls[1]["prompt"]
     assert urls(answer) == ["https://www.lemonde.fr/b-é2.html"]
-    assert [(a["call"], a["thinking"], a["usable_sources"]) for a in answer["attempts"]] == [("gemini_1", "low", 0), ("gemini_2", None, 1)]
+    assert [(a["call"], a["thinking"], a["usable_sources"]) for a in answer["attempts"]] == [("gemini_1", "low", 0), ("gemini_2", "medium", 1)]
 
 
 def test_linkup_first_with_no_page_falls_back_to_gemini_alone(run):
@@ -496,7 +496,7 @@ def test_a_check_leaves_one_journal_line_with_everything_that_decided_it(run, mo
     first, second = row["attempts"]                                   # the replaced answer is kept, with its reasoning
     assert (first["call"], first["thinking"], first["verdict"], first["explanation"], first["usable_sources"]) == ("gemini_1", "low", "faux", "de mémoire", 0)
     assert (second["call"], second["thinking"], second["usable_sources"], second["evidence"], second["own"], second["basis"]) == (
-        "gemini_2", None, 1, "inference", True, "external_facts")
+        "gemini_2", "medium", 1, "inference", True, "external_facts")
     assert second["sources"][0]["says"] == "dit ceci" and second["searched"] is False and first["seconds"] >= 0
     d = row["decision"]
     assert (d["winner"], d["asked"], d["verdict"], d["calibration"], d["evidence"]) == (

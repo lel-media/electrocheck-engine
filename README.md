@@ -49,7 +49,7 @@ Python 3.12 or later.
 | `CHECK_ORDER` | `google_first` | `linkup_first` or `google_first` (a request can ask for either) |
 | `GEMINI_MODEL` | `gemini-4-hydrogen` | the model that checks |
 | `CHECK_THINKING` | `low` | how much the check thinks: `low`, `medium`, `high` or `default` (the model's own) |
-| `CHECK_RETRY_THINKING` | `default` | the same, for the retry when the first answer cites no usable page |
+| `CHECK_RETRY_THINKING` | `medium` | the same, for the retry when the first answer cites no usable page |
 | `GEMINI_PREFLIGHT_MODEL` | `gemini-3.5-flash-lite` | the model that writes the Linkup query (temperature 0, fixed seed: one claim, one query) |
 | `GEMINI_QUERY_SEED` | `20261116` | that seed |
 | `QUERY_CACHE` | (none) | for benchmarks: a file that keeps each query written, one line per claim, so a claim replayed searches with the same words |
@@ -215,7 +215,7 @@ Python 3.12 ou plus récent.
 | `CHECK_ORDER` | `google_first` | `linkup_first` ou `google_first` (une requête peut demander l'un ou l'autre) |
 | `GEMINI_MODEL` | `gemini-4-hydrogen` | le modèle qui vérifie |
 | `CHECK_THINKING` | `low` | combien la vérification réfléchit : `low`, `medium`, `high` ou `default` (le choix du modèle) |
-| `CHECK_RETRY_THINKING` | `default` | la même chose, pour le nouvel essai quand la première réponse ne cite aucune page utilisable |
+| `CHECK_RETRY_THINKING` | `medium` | la même chose, pour le nouvel essai quand la première réponse ne cite aucune page utilisable |
 | `GEMINI_PREFLIGHT_MODEL` | `gemini-3.5-flash-lite` | le modèle qui écrit la requête Linkup (température 0, graine fixe : une affirmation, une requête) |
 | `GEMINI_QUERY_SEED` | `20261116` | cette graine |
 | `QUERY_CACHE` | (aucun) | pour les bancs d'essai : un fichier qui garde chaque requête écrite, une ligne par affirmation, pour qu'une affirmation rejouée cherche avec les mêmes mots |
