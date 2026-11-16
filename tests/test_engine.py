@@ -595,3 +595,13 @@ def test_a_figure_the_cited_page_gives_but_its_says_left_out_is_found_on_the_pag
     _, answer, _ = run(g, pages=pages, check_order="linkup_first", **ATTAL)
     assert len(g.calls) == 1 and answer["verdict"] == "plutot_faux"
     assert "5,2 % depuis début 2025" in answer["sources"][0]["says"]
+
+
+def test_no_notch_lower_when_a_cited_page_could_not_be_read(run):
+    """A figure may be on a page a site would not let us read (anti-bot, paywall): asked again, but not lowered."""
+    unread = [{"type": "text", "name": "Le Monde", "url": "https://www.lemonde.fr/x.html", "content": ""}, PAGES[1]]
+    summary = "Les institutionnels ont investi 3,1 milliards d'euros (+14 %)."
+    g = Gemini(reply(negative([{"page": 1, "says": "Les investisseurs ont déserté."}], summary)),
+               reply(negative([{"page": 1, "says": "Les investisseurs ont déserté."}], summary)))
+    _, answer, _ = run(g, pages=unread, check_order="linkup_first", **ATTAL)
+    assert len(g.calls) == 2 and answer["verdict"] == "plutot_faux"

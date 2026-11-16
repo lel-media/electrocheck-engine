@@ -349,18 +349,21 @@ async def page_texts(sources: list[dict], known: dict[str, str]) -> dict[str, st
             r = await http.get(url, timeout=PAGE_TIMEOUT, follow_redirects=True, headers={"User-Agent": "Mozilla/5.0"})
             if r.status_code != 200 or "html" not in r.headers.get("content-type", "html"):
                 return ""
-            return " ".join(html.unescape(_TAGS.sub(" ", r.text)).split())[:PAGE_TEXT_CHARS]
+            text = " ".join(html.unescape(_TAGS.sub(" ", r.text)).split())[:PAGE_TEXT_CHARS]
+            return text if len(text) >= 300 else ""          # a challenge page or a script shell: not the page
         except (httpx.HTTPError, ValueError):
             return ""
     urls = [s["url"] for s in sources if usable(s["url"])][:6]
     return dict(zip(urls, await asyncio.gather(*(one(u) for u in urls))))
 
 
-async def grounded(sources: list[dict], missing: list[str], known: dict[str, str]) -> list[str]:
+async def grounded(sources: list[dict], missing: list[str], known: dict[str, str]) -> tuple[list[str], int]:
     """The figures still missing once the cited pages themselves are read: the model often leaves out of a page's "says" a
     figure the page does give. Such a figure's sentence is added to that source's "says" (the post writer may then use
-    it); a figure on none of the pages stays missing (2026-11-16: Glucksmann's Insee figures were on no cited page)."""
+    it); a figure on none of the pages stays missing (2026-11-16: Glucksmann's Insee figures were on no cited page). Also
+    returns how many cited pages could not be read (anti-bot, paywall, PDF: 25 of 80 cited pages that week)."""
     texts = await page_texts(sources, known)
+    unread = sum(1 for t in texts.values() if not t)
     left = []
     for figure in missing:
         hit = next(((url, sentence) for url, text in texts.items() for sentence in _SENTENCE.split(text)
@@ -372,7 +375,7 @@ async def grounded(sources: list[dict], missing: list[str], known: dict[str, str
         source = next(s for s in sources if s["url"] == url)
         if sentence[:300] not in (source.get("says") or ""):
             source["says"] = f'{source.get("says") or ""} {sentence[:300]}'.strip()
-    return left
+    return left, unread
 
 
 def normal_verdict(raw) -> str:
@@ -577,6 +580,7 @@ async def check(claim: dict) -> dict:
             return payload, merged
 
         payload, sources, winner = None, [], None
+        unreadable = False                   # a cited page could not be read: an unsourced figure may be on it
         if order == "linkup_first":
             pages, listing = await find_pages()
             full_prompt = prompt + prompts.PAGES_FIRST.format(pages=listing) if pages else prompt
@@ -587,7 +591,8 @@ async def check(claim: dict) -> dict:
                     if any(usable(s["url"]) for s in sources):
                         missing = unsourced_figures(payload, sources, text, quote, meant)
                         if missing:                          # read the pages themselves before asking again
-                            missing = await grounded(sources, missing, {pg["url"]: pg.get("full") or "" for pg in pages})
+                            missing, unread = await grounded(sources, missing, {pg["url"]: pg.get("full") or "" for pg in pages})
+                            unreadable = unread > 0
                         if not missing:
                             break
                         # a negative verdict on figures no cited page gives: once more, asked to cite them or rethink
@@ -663,7 +668,9 @@ async def check(claim: dict) -> dict:
             elif verdict == "faux" and evidence == "inference":
                 verdict, calibration = "plutot_faux", "faux->plutot_faux (evidence: inference)"
             # still stating figures no cited page gives: one notch less sure (the owner's rule: lower rather than nothing)
-            if verdict in NOTCH and (missing := unsourced_figures({**payload, "verdict": verdict}, sources, text, quote, meant)):
+            # only when every cited page was read: a figure may be on a page a site would not let us read
+            if verdict in NOTCH and not unreadable and (missing := unsourced_figures({**payload, "verdict": verdict}, sources,
+                                                                                     text, quote, meant)):
                 lower = NOTCH[verdict]
                 calibration = f"{verdict}->{lower} (figures no cited source gives: {', '.join(missing)})"
                 verdict = lower
