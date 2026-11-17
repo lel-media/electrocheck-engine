@@ -52,18 +52,12 @@ GEMINI_KEY = os.environ.get("API_GEMINI", "")
 LINKUP_KEY = os.environ.get("API_LINKUP", "")                       # recommended: without it, Gemini's own search only
 MODEL = os.environ.get("GEMINI_MODEL", "gemini-4-hydrogen")           # the check
 QUERY_MODEL = os.environ.get("GEMINI_PREFLIGHT_MODEL", "gemini-3.5-flash-lite")   # the Linkup query
-# The Linkup query is written at temperature 0 with a fixed seed: at 0.1 the small model wrote another query each time, and
-# two queries for one claim shared 0 to 7 of their 12 pages; deterministic, the same query 3 times out of 3 on 8 claims
-# (2026-11-16, ~/bench/2026-11-16-linkup-query*/ on the Classic box)
 QUERY_SEED = int(os.environ.get("GEMINI_QUERY_SEED", "20261116"))
 # For benchmarks only: a file where each query written is kept (one JSON line per claim, keyed by the query prompt), so a
 # claim replayed searches Linkup with the same words. Unset in production: no query is kept
 QUERY_CACHE = os.environ.get("QUERY_CACHE", "")
 API_VERSION = os.environ.get("GEMINI_API_VERSION", "v1")
 CHECK_ORDER = os.environ.get("CHECK_ORDER", "google_first")         # google_first | linkup_first
-# how much the check thinks: low | medium | high | default (the model's own). gemini-4-hydrogen at its default took 3 to 5
-# times as long as gemini-3.8-flash; at low, a median 20 s for the same verdicts (12 claims of the Classic, 2026-11-16).
-# The retry, when the first answer cites no usable page, thinks harder.
 FIRST_THINKING = os.environ.get("CHECK_THINKING", "low").removeprefix("default") or None
 RETRY_THINKING = os.environ.get("CHECK_RETRY_THINKING", "medium").removeprefix("default") or None
 # One JSON line per check in CHECK_LOG/checks-<day>.jsonl: the request, the Linkup query and pages, every Gemini call (the
@@ -105,9 +99,7 @@ CATALOG_DOMAINS = tuple((urlparse(url).hostname or "").removeprefix("www.") for 
 SOURCE_LIST = "\n".join(f"- {name} ({domain}) — {url}" for (name, url), domain in zip(CATALOG, CATALOG_DOMAINS))
 
 # Source tiers: 1 primary (official statistics, institutions, international bodies, public research, Our World in Data), 2 big
-# newspapers and well-known media, 3 the rest. A domain matches itself and its subdomains. The Assemblée nationale and the
-# Sénat are not tier 1 (owner, 2026-11-16): their reports are political, not statistics (a Senate inquiry's 211 Md€ of aid
-# to firms, where the statistical bodies count 108 to 112 Md€, made a "200 milliards" claim "mixte").
+# newspapers and well-known media, 3 the rest. A domain matches itself and its subdomains.
 FIRST_PARTY = tuple(url.split("//", 1)[1].split("/", 1)[0].removeprefix("www.") for _, url in CATALOG) + (
     "ec.europa.eu", "europa.eu", "dares.travail-emploi.gouv.fr", "drees.solidarites-sante.gouv.fr", "ined.fr", "inrae.fr",
     "cnrs.fr", "cepii.fr", "strategie.gouv.fr", "cae-eco.fr", "cor-retraites.fr", "ademe.fr", "conseil-constitutionnel.fr",
