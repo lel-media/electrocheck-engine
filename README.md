@@ -19,8 +19,8 @@ live transcription and the extraction, is not in this repository).
      answer, then once more thinking harder.
 
    A usable source is a page, never a site's homepage, and never a link the model wrote from memory without searching.
-   Sources are ranked: 1 primary (official statistics, institutions, parliaments, international bodies, public research),
-   2 major media, 3 the rest. Social networks and video sites are excluded from the search.
+   Sources are ranked: 1 primary (official statistics, institutions, international bodies, public research), 2 major
+   media, 3 the rest. Parliamentary reports are not primary: they are political, not statistics. Social networks and video sites are excluded from the search.
 2. **The model's answer.** A verdict (`vrai`, `plutot_vrai`, `mixte`, `plutot_faux`, `faux`, `insuffisant`), an
    explanation whose every fact comes from a cited source, and flags on how it judged (read by the code, not returned):
    - `own`: the words are the speaker's own assertion, not a quote they rebut, a hypothesis, or a promise or forecast with nothing checkable in it;
@@ -52,6 +52,7 @@ Python 3.12 or later.
 | `CHECK_RETRY_THINKING` | `medium` | the same, for the retry when the first answer cites no usable page |
 | `GEMINI_PREFLIGHT_MODEL` | `gemini-3.5-flash-lite` | the model that writes the Linkup query (temperature 0, fixed seed: one claim, one query) |
 | `GEMINI_QUERY_SEED` | `20261116` | that seed |
+| `CHECK_FIGURE_RETRY` | `0` | `1`: a negative verdict whose figures no cited page gives is asked again, then lowered one notch (off: it tripled the check's time) |
 | `QUERY_CACHE` | (none) | for benchmarks: a file that keeps each query written, one line per claim, so a claim replayed searches with the same words |
 | `GEMINI_API_VERSION` | `v1` | Gemini API version |
 | `CHECK_LOG` | `logs` | folder of the journal of the checks (see below); empty = none |
@@ -117,11 +118,13 @@ The answer:
 | Field | What it is |
 |---|---|
 | `verdict` | `vrai`, `plutot_vrai`, `mixte`, `plutot_faux`, `faux` or `insuffisant` |
+| `summary` | one sentence to say it on air; empty when the code brought the verdict down to `insuffisant` |
 | `explanation` | 2 to 4 sentences, on the facts only |
 | `confidence` | 0 to 1, as the model gave it |
 | `meant` | the sense of the claim that was judged |
 | `guard` | why the verdict was forced to `insuffisant` (a flag, or what the evidence allows), else `null` |
-| `sources` | `[{title, url, domain, tier, says}]`, best first; `says` is what the page establishes |
+| `unsourced` | the figures of `summary` and `explanation` that no cited page (nor the claim) gives, to hold the verdict downstream |
+| `sources` | `[{title, url, domain, tier, says}]`, best first; `says` holds every fact taken from the page |
 | `attempts` | each Gemini check call, the replaced ones included: `{call, thinking, verdict, confidence, usable_sources}`, or `{call, thinking, failed}` |
 
 An error answers HTTP 500 with `{"error": "..."}` (400 when `claim` is missing).
@@ -137,7 +140,7 @@ The answer is kept lean; the reasoning is in the journal. Each check appends one
 | `id`, `at`, `seconds`, `order`, `model`, `prompts` | your id, when, how long, which order, which model, a short hash of the prompts in use |
 | `linkup` | the query written for Linkup and its date filter, how long it took, an error if any, the pages found (url, tier) |
 | `attempts` | every Gemini check call, the replaced ones included: thinking level, seconds, whether it really searched, its verdict, confidence, explanation, flags (`own`, `faithful`, `scope_ok`, `basis`, `evidence`) and the sources it gave, or why it failed |
-| `decision` | which call won, the verdict asked and the verdict returned, `guard` and `calibration`, the flags and the sources kept |
+| `decision` | which call won, the verdict asked and the verdict returned, `guard` and `calibration`, the flags, the figures no page gives, the cited pages that could not be read, and the sources kept |
 | `error` | what went wrong, when the check failed |
 
 A line is about 5 KB. A write that fails never stops a check. To keep the folder small, delete the old files
@@ -181,9 +184,9 @@ L'entrée est une affirmation déjà extraite de la transcription, dont on a pro
      avec sa première réponse, puis on redemande une fois avec une réflexion plus poussée.
 
    Une source exploitable est une page, jamais la page d'accueil d'un site, et jamais un lien que le modèle a écrit de
-   mémoire sans avoir cherché. Les sources sont classées : 1 primaires (statistiques officielles, institutions, parlements,
-   organismes internationaux, recherche publique), 2 grands médias, 3 le reste. Les réseaux sociaux et les sites de vidéo
-   sont exclus de la recherche.
+   mémoire sans avoir cherché. Les sources sont classées : 1 primaires (statistiques officielles, institutions, organismes
+   internationaux, recherche publique), 2 grands médias, 3 le reste. Les rapports parlementaires ne sont pas primaires : ils
+   sont politiques, pas statistiques. Les réseaux sociaux et les sites de vidéo sont exclus de la recherche.
 2. **La réponse du modèle.** Un verdict (`vrai`, `plutot_vrai`, `mixte`, `plutot_faux`, `faux`, `insuffisant`), une
    explication dont chaque fait vient d'une source citée, et des indicateurs sur la façon dont il a jugé (lus par le code,
    non renvoyés) :
@@ -218,6 +221,7 @@ Python 3.12 ou plus récent.
 | `CHECK_RETRY_THINKING` | `medium` | la même chose, pour le nouvel essai quand la première réponse ne cite aucune page utilisable |
 | `GEMINI_PREFLIGHT_MODEL` | `gemini-3.5-flash-lite` | le modèle qui écrit la requête Linkup (température 0, graine fixe : une affirmation, une requête) |
 | `GEMINI_QUERY_SEED` | `20261116` | cette graine |
+| `CHECK_FIGURE_RETRY` | `0` | `1` : un verdict négatif dont aucune page citée ne donne les chiffres est redemandé, puis baissé d'un cran (désactivé : il triplait la durée de la vérification) |
 | `QUERY_CACHE` | (aucun) | pour les bancs d'essai : un fichier qui garde chaque requête écrite, une ligne par affirmation, pour qu'une affirmation rejouée cherche avec les mêmes mots |
 | `GEMINI_API_VERSION` | `v1` | version de l'API Gemini |
 | `CHECK_LOG` | `logs` | dossier du journal des vérifications (voir plus bas) ; vide = aucun |
@@ -283,11 +287,13 @@ La réponse :
 | Champ | Contenu |
 |---|---|
 | `verdict` | `vrai`, `plutot_vrai`, `mixte`, `plutot_faux`, `faux` ou `insuffisant` |
+| `summary` | une phrase pour le dire à l'antenne ; vide quand le code a ramené le verdict à `insuffisant` |
 | `explanation` | 2 à 4 phrases, sur les faits uniquement |
 | `confidence` | de 0 à 1, telle que le modèle l'a donnée |
 | `meant` | le sens de l'affirmation qui a été jugé |
 | `guard` | pourquoi le verdict a été ramené à `insuffisant` (un indicateur, ou ce que les preuves permettent), sinon `null` |
-| `sources` | `[{title, url, domain, tier, says}]`, les meilleures d'abord ; `says` est ce que la page établit |
+| `unsourced` | les chiffres de `summary` et `explanation` qu'aucune page citée (ni l'affirmation) ne donne, pour retenir le verdict en aval |
+| `sources` | `[{title, url, domain, tier, says}]`, les meilleures d'abord ; `says` réunit chaque fait tiré de la page |
 | `attempts` | chaque appel de vérification à Gemini, y compris ceux qui ont été remplacés : `{call, thinking, verdict, confidence, usable_sources}`, ou `{call, thinking, failed}` |
 
 Une erreur renvoie HTTP 500 avec `{"error": "..."}` (400 quand `claim` manque).
@@ -303,7 +309,7 @@ La réponse reste légère ; le raisonnement est dans le journal. Chaque vérifi
 | `id`, `at`, `seconds`, `order`, `model`, `prompts` | votre identifiant, quand, combien de temps, quel ordre, quel modèle, une empreinte courte des prompts utilisés |
 | `linkup` | la requête écrite pour Linkup et son filtre de date, sa durée, une erreur éventuelle, les pages trouvées (url, rang) |
 | `attempts` | chaque appel de vérification à Gemini, y compris ceux qui ont été remplacés : niveau de réflexion, durée, a-t-il vraiment cherché, son verdict, sa confiance, son explication, ses indicateurs (`own`, `faithful`, `scope_ok`, `basis`, `evidence`) et les sources données, ou pourquoi il a échoué |
-| `decision` | quel appel l'a emporté, le verdict demandé et le verdict rendu, `guard` et `calibration`, les indicateurs et les sources retenues |
+| `decision` | quel appel l'a emporté, le verdict demandé et le verdict rendu, `guard` et `calibration`, les indicateurs, les chiffres qu'aucune page ne donne, les pages citées qui n'ont pas pu être lues, et les sources retenues |
 | `error` | ce qui a échoué, si la vérification a échoué |
 
 Une ligne fait environ 5 Ko. Une écriture qui échoue n'arrête jamais une vérification. Pour garder un dossier léger,
